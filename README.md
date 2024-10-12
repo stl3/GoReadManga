@@ -1,0 +1,2 @@
+# GoReadManga
+Find, read, maybe.
