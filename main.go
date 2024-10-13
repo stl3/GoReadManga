@@ -79,6 +79,7 @@ var (
 	servers          = []string{"server2", "server1"} // Switch between content servers serving media
 	contentServer    string
 	isJPMode         bool        // check whether user wants jpegli enabled
+	isCCacheMode     bool        // This check is done so we don't print storage size when inside program since it is called in inputControls()
 	useFancyDecoding      = true // Flag for toggling decoding method
 	jpegliQuality    int  = 85   // Default quality for jpegli encoding
 	titleStyle            = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF79C6"))
@@ -121,10 +122,37 @@ func init() {
 	debug.SetMaxStack(1000000000)
 
 	checkJPFlag()
-
-	tempDir := os.TempDir()
-	cacheDir = filepath.Join(tempDir, ".cache", "goreadmanga")
-
+	checkCCacheFlag()
+	//////////////////////////////////////////////////////////
+	// Only for my personal config
+	// Get the hostname of the machine
+	hostname, err := os.Hostname()
+	if err != nil {
+		fmt.Println("Error retrieving hostname:", err)
+		return
+	}
+	// fmt.Println("Hostname is:", hostname) // Just for debugging
+	// Check if the OS is Windows and the hostname matches "7950X3D" or "DEMONSEED-W10"
+	if runtime.GOOS == "windows" && (hostname == "7950x3d" || hostname == "DemonSeed-W10") {
+		// Check if the T: drive is available
+		if _, err := os.Stat("T:/"); os.IsNotExist(err) {
+			// Fallback to tempDir if T: drive is not available
+			fmt.Println("T: Drive does not exist:", err)
+			tempDir := os.TempDir()
+			cacheDir = filepath.Join(tempDir, ".cache", "goreadmanga")
+		} else {
+			cacheDir = "T:/.cache/goreadmanga"
+		}
+	} else {
+		// Fallback to tempDir for non-matching hostnames or non-Windows OS
+		tempDir := os.TempDir()
+		cacheDir = filepath.Join(tempDir, ".cache", "goreadmanga")
+	}
+	/////////////////////////////////////////////////////////////
+	// When distributing public
+	// // tempDir := os.TempDir()
+	// // cacheDir = filepath.Join(tempDir, ".cache", "goreadmanga")
+	////////////////////////////////////////////////////////////
 }
 
 func main() {
@@ -225,7 +253,10 @@ func showCacheSize() {
 }
 
 func clearCache() {
-	showCacheSize()
+	if !isCCacheMode { // Unlikely case, but if -C or --clear-cache ran with program we prevent it from showing duplicate cache size in menu
+		showCacheSize()
+	}
+
 	if promptYesNo("Proceed with clearing the cache?") {
 		err := os.RemoveAll(cacheDir)
 		if err != nil {
@@ -671,58 +702,142 @@ func openPDF(pdfPath string) {
 	}
 }
 
+// // func inputControls(manga MangaResult, chapters []Chapter, currentChapter Chapter) {
+// // 	// Function to fetch and update the chapter title
+// // 	updateChapterInfo := func(currentChapter Chapter) (string, string) {
+// // 		// Regular expression to match 'chapter-' followed by digits
+// // 		re := regexp.MustCompile(`(chapter-)\d+$`)
+// // 		// Convert the chapter number to a string
+// // 		newChapterNumber := strconv.Itoa(currentChapter.Number)
+// // 		// Replace the chapter number in the URL
+// // 		newCurrentChapterURL := re.ReplaceAllString(currentChapter.URL, "${1}"+newChapterNumber)
+
+// // 		// Fetch the new chapter document
+// // 		doc, err := fetchDocument(newCurrentChapterURL)
+// // 		if err != nil {
+// // 			fmt.Printf("Error fetching chapter images: %v\n", err)
+// // 			return "", ""
+// // 		}
+
+// // 		// Get the updated chapter title
+// // 		chapterTitle := doc.Find(".panel-chapter-info-top h1").Text()
+// // 		return newCurrentChapterURL, chapterTitle
+// // 	}
+
+// // 	// Initial chapter info
+// // 	// currentChapter.URL, chapterTitle := updateChapterInfo(currentChapter)
+// // 	newURL, chapterTitle := updateChapterInfo(currentChapter)
+// // 	currentChapter.URL = newURL // Explicitly assign the new URL to the struct field
+
+// // 	for {
+// // 		/////////////////////////////////////////////
+// // 		// My emoji no color on vscodium (Segoe UI Emoji font issue)
+// // 		// I had fixed this once, but now it's back
+// // 		// Something to do with:
+// // 		// [HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts]
+// // 		// [HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts]
+// // 		// [HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontSubstitutes]
+// // 		// so I am keeping this here for when it does work
+// // 		// fmt.Println(
+// // 		// 	bracketStyle.Render("[") +
+// // 		// 		chapterStyleWithBG.Render("Chapter") +
+// // 		// 		highlightStyle.Render(fmt.Sprintf(" %d/%d", currentChapter.Number, len(chapters))) +
+// // 		// 		bracketStyle.Render("] ") + "▄︻デ══━一 🌟💥 " +
+// // 		// 		titleStyleWithBg.Render(chapterTitle) + " 💥🌟",
+// // 		// )
+// // 		/////////////////////////////////////////////
+// // 		fmt.Println(
+// // 			bracketStyle.Render("[") +
+// // 				chapterStyleWithBG.Render("Chapter") +
+// // 				highlightStyle.Render(fmt.Sprintf(" %d/%d", currentChapter.Number, len(chapters))) +
+// // 				bracketStyle.Render("] ") +
+// // 				titleStyleWithBg.Render("▄︻デ══━一 🌟💥 ", chapterTitle, " 💥🌟"),
+// // 		)
+
+// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("N") + bracketStyle.Render("]") + textStyle.Render(" Next chapter"))
+// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("P") + bracketStyle.Render("]") + textStyle.Render(" Previous chapter"))
+// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("S") + bracketStyle.Render("]") + textStyle.Render(" Select chapter"))
+// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("R") + bracketStyle.Render("]") + textStyle.Render(" Reopen current chapter"))
+// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("A") + bracketStyle.Render("]") + textStyle.Render(" Search another manga"))
+// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("CS") + bracketStyle.Render("]") + textStyle.Render(" Toggle between content server1/2"))
+// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("D") + bracketStyle.Render("]") + textStyle.Render(" Toggle image decoding method [jpegli/normal]"))
+// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("M") + bracketStyle.Render("]") + textStyle.Render(" Toggle jpegli encoding mode [jpegli/normal]"))
+// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("C") + bracketStyle.Render("]") + textStyle.Render(" Clear cache"))
+// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("Q") + bracketStyle.Render("]") + textStyle.Render(" Exit"))
+// // 		showCacheSize()
+// // 		choice := strings.ToLower(promptUser(textStyle.Render("Enter input:")))
+
+// // 		switch choice {
+// // 		case "n":
+// // 			if currentChapter.Number < len(chapters) {
+// // 				// Move directly to the next chapter
+// // 				currentChapter = chapters[currentChapter.Number] // Use currentChapter.Number directly to get the next chapter
+// // 				currentChapter.URL, chapterTitle = updateChapterInfo(currentChapter)
+// // 				checkIfPDFExist(manga, chapterTitle, cacheDir, currentChapter)
+// // 			}
+// // 		case "p":
+// // 			if currentChapter.Number > 1 {
+// // 				// Move directly to the previous chapter
+// // 				currentChapter = chapters[currentChapter.Number-2] // Use currentChapter.Number-2 to get the previous chapter
+// // 				currentChapter.URL, chapterTitle = updateChapterInfo(currentChapter)
+// // 				checkIfPDFExist(manga, chapterTitle, cacheDir, currentChapter)
+// // 			}
+// // 		case "s":
+// // 			currentChapter = selectChapter(chapters)
+// // 			currentChapter.URL, chapterTitle = updateChapterInfo(currentChapter) // Update title and URL
+// // 			checkIfPDFExist(manga, chapterTitle, cacheDir, currentChapter)
+// // 		case "r":
+// // 			checkIfPDFExist(manga, chapterTitle, cacheDir, currentChapter)
+// // 		case "a":
+// // 			searchAndReadManga()
+// // 			return
+// // 		case "cs":
+// // 			changeServerOrder()
+// // 		case "d":
+// // 			toggleDecodingMethod()
+// // 		case "m":
+// // 			isJPMode = !isJPMode
+// // 			if isJPMode {
+// // 				fmt.Println("✔️✔️ ⚡⚡ " + indexStyle.Render("jpegli encoding active") + " ⚡⚡ ✔️✔️") // I wish I could see this in color on my damn ide
+// // 			} else {
+// // 				fmt.Println("❌❌ " + indexStyle.Render("jpegli encoding deactivated") + " ❌❌") // Why don't you show color anymore?
+// // 			}
+// // 		case "c":
+// // 			clearCache()
+// // 		case "q":
+// // 			os.Exit(0)
+// // 		default:
+// // 			fmt.Println(subtitleStyle.Render("Invalid input, please try again."))
+// // 		}
+// // 	}
+// // }
+
 func inputControls(manga MangaResult, chapters []Chapter, currentChapter Chapter) {
 	// Function to fetch and update the chapter title
 	updateChapterInfo := func(currentChapter Chapter) (string, string) {
-		// Regular expression to match 'chapter-' followed by digits
 		re := regexp.MustCompile(`(chapter-)\d+$`)
-		// Convert the chapter number to a string
 		newChapterNumber := strconv.Itoa(currentChapter.Number)
-		// Replace the chapter number in the URL
 		newCurrentChapterURL := re.ReplaceAllString(currentChapter.URL, "${1}"+newChapterNumber)
 
-		// Fetch the new chapter document
 		doc, err := fetchDocument(newCurrentChapterURL)
 		if err != nil {
 			fmt.Printf("Error fetching chapter images: %v\n", err)
 			return "", ""
 		}
 
-		// Get the updated chapter title
 		chapterTitle := doc.Find(".panel-chapter-info-top h1").Text()
 		return newCurrentChapterURL, chapterTitle
 	}
 
-	// Initial chapter info
-	// currentChapter.URL, chapterTitle := updateChapterInfo(currentChapter)
-	newURL, chapterTitle := updateChapterInfo(currentChapter)
-	currentChapter.URL = newURL // Explicitly assign the new URL to the struct field
-
-	for {
-		/////////////////////////////////////////////
-		// My emoji no color on vscodium (Segoe UI Emoji font issue)
-		// I had fixed this once, but now it's back
-		// Something to do with:
-		// [HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts]
-		// [HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts]
-		// [HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontSubstitutes]
-		// so I am keeping this here for when it does work
-		// fmt.Println(
-		// 	bracketStyle.Render("[") +
-		// 		chapterStyleWithBG.Render("Chapter") +
-		// 		highlightStyle.Render(fmt.Sprintf(" %d/%d", currentChapter.Number, len(chapters))) +
-		// 		bracketStyle.Render("] ") + "▄︻デ══━一 🌟💥 " +
-		// 		titleStyleWithBg.Render(chapterTitle) + " 💥🌟",
-		// )
-		/////////////////////////////////////////////
+	// Function to display chapter menu
+	displayMenu := func(chapterTitle string, currentChapterNumber int, totalChapters int) {
 		fmt.Println(
 			bracketStyle.Render("[") +
 				chapterStyleWithBG.Render("Chapter") +
-				highlightStyle.Render(fmt.Sprintf(" %d/%d", currentChapter.Number, len(chapters))) +
+				highlightStyle.Render(fmt.Sprintf(" %d/%d", currentChapterNumber, totalChapters)) +
 				bracketStyle.Render("] ") +
 				titleStyleWithBg.Render("▄︻デ══━一 🌟💥 ", chapterTitle, " 💥🌟"),
 		)
-
 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("N") + bracketStyle.Render("]") + textStyle.Render(" Next chapter"))
 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("P") + bracketStyle.Render("]") + textStyle.Render(" Previous chapter"))
 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("S") + bracketStyle.Render("]") + textStyle.Render(" Select chapter"))
@@ -734,29 +849,29 @@ func inputControls(manga MangaResult, chapters []Chapter, currentChapter Chapter
 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("C") + bracketStyle.Render("]") + textStyle.Render(" Clear cache"))
 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("Q") + bracketStyle.Render("]") + textStyle.Render(" Exit"))
 		showCacheSize()
-		choice := strings.ToLower(promptUser(textStyle.Render("Enter input:")))
+	}
 
+	// Function to handle chapter navigation
+	handleChapterNavigation := func(choice string, currentChapter *Chapter, chapterTitle *string) {
 		switch choice {
 		case "n":
 			if currentChapter.Number < len(chapters) {
-				// Move directly to the next chapter
-				currentChapter = chapters[currentChapter.Number] // Use currentChapter.Number directly to get the next chapter
-				currentChapter.URL, chapterTitle = updateChapterInfo(currentChapter)
-				checkIfPDFExist(manga, chapterTitle, cacheDir, currentChapter)
+				*currentChapter = chapters[currentChapter.Number]
+				currentChapter.URL, *chapterTitle = updateChapterInfo(*currentChapter)
+				checkIfPDFExist(manga, *chapterTitle, cacheDir, *currentChapter)
 			}
 		case "p":
 			if currentChapter.Number > 1 {
-				// Move directly to the previous chapter
-				currentChapter = chapters[currentChapter.Number-2] // Use currentChapter.Number-2 to get the previous chapter
-				currentChapter.URL, chapterTitle = updateChapterInfo(currentChapter)
-				checkIfPDFExist(manga, chapterTitle, cacheDir, currentChapter)
+				*currentChapter = chapters[currentChapter.Number-2]
+				currentChapter.URL, *chapterTitle = updateChapterInfo(*currentChapter)
+				checkIfPDFExist(manga, *chapterTitle, cacheDir, *currentChapter)
 			}
 		case "s":
-			currentChapter = selectChapter(chapters)
-			currentChapter.URL, chapterTitle = updateChapterInfo(currentChapter) // Update title and URL
-			checkIfPDFExist(manga, chapterTitle, cacheDir, currentChapter)
+			*currentChapter = selectChapter(chapters)
+			currentChapter.URL, *chapterTitle = updateChapterInfo(*currentChapter)
+			checkIfPDFExist(manga, *chapterTitle, cacheDir, *currentChapter)
 		case "r":
-			checkIfPDFExist(manga, chapterTitle, cacheDir, currentChapter)
+			checkIfPDFExist(manga, *chapterTitle, cacheDir, *currentChapter)
 		case "a":
 			searchAndReadManga()
 			return
@@ -766,11 +881,7 @@ func inputControls(manga MangaResult, chapters []Chapter, currentChapter Chapter
 			toggleDecodingMethod()
 		case "m":
 			isJPMode = !isJPMode
-			if isJPMode {
-				fmt.Println("✔️✔️ ⚡⚡ " + indexStyle.Render("jpegli encoding active") + " ⚡⚡ ✔️✔️") // I wish I could see this in color on my damn ide
-			} else {
-				fmt.Println("❌❌ " + indexStyle.Render("jpegli encoding deactivated") + " ❌❌") // Why don't you show color anymore?
-			}
+			displayEncodingStatus()
 		case "c":
 			clearCache()
 		case "q":
@@ -778,6 +889,25 @@ func inputControls(manga MangaResult, chapters []Chapter, currentChapter Chapter
 		default:
 			fmt.Println(subtitleStyle.Render("Invalid input, please try again."))
 		}
+	}
+
+	// Main input loop
+	newURL, chapterTitle := updateChapterInfo(currentChapter)
+	currentChapter.URL = newURL
+
+	for {
+		displayMenu(chapterTitle, currentChapter.Number, len(chapters))
+		choice := strings.ToLower(promptUser(textStyle.Render("Enter input:")))
+		handleChapterNavigation(choice, &currentChapter, &chapterTitle)
+	}
+}
+
+// Function to display jpegli mode
+func displayEncodingStatus() {
+	if isJPMode {
+		fmt.Println("✔️✔️ ⚡⚡ " + indexStyle.Render("jpegli encoding active") + " ⚡⚡ ✔️✔️")
+	} else {
+		fmt.Println("❌❌ " + indexStyle.Render("jpegli encoding deactivated") + " ❌❌")
 	}
 }
 
@@ -789,10 +919,10 @@ func checkIfPDFExist(manga MangaResult, chapterTitle string, cacheDir string, cu
 
 	// Return if PDF already exists
 	if _, err := os.Stat(pdfPath); err == nil {
-		fmt.Printf(infoStyle.Render("PDF already exists: %s\n"), pdfPath)
+		// fmt.Printf(infoStyle.Render("PDF already exists: %s\n"), pdfPath)
 		openPDF(pdfPath)
 	} else {
-		fmt.Printf("PDF doesn't exist: %s\n", pdfPath)
+		fmt.Printf(infoStyle.Render("PDF doesn't exist: %s\n", pdfPath))
 		openChapter(manga, currentChapter)
 	}
 }
@@ -1132,90 +1262,215 @@ func processJPImage(filepath string) error {
 	return nil
 }
 
-func processImage(filepath string) error {
+// func processImage(filepath string) error {
 
-	// Identify the image format
-	format, err := IdentifyImageFormat(filepath)
+// 	// Identify the image format
+// 	format, err := IdentifyImageFormat(filepath)
+// 	if err != nil {
+// 		return fmt.Errorf("error identifying image format: %v", err)
+// 	}
+
+// 	fmt.Printf("Detected image format: %s\n", format)
+
+// 	// Open the original file
+// 	origFile, err := os.Open(filepath)
+// 	if err != nil {
+// 		return fmt.Errorf("error opening image file: %v", err)
+// 	}
+// 	defer origFile.Close()
+
+// 	// Declare the img variable
+// 	var img image.Image
+
+// 	// Get the original file size
+// 	origInfo, err := origFile.Stat()
+// 	if err != nil {
+// 		return fmt.Errorf("error getting original file info: %v", err)
+// 	}
+// 	origSize := origInfo.Size()
+
+// 	if format == "png" {
+// 		// Decode PNG images first
+// 		img, err = png.Decode(origFile)
+// 		if err != nil {
+// 			return fmt.Errorf("error decoding PNG image: %v", err)
+// 		}
+// 		// Convert PNG to JPEG and save it
+// 		if err := convertToJpeg(img, filepath); err != nil {
+// 			return err // Handle conversion errors
+// 		}
+// 	}
+// 	// Now, open the newly created JPEG file
+// 	origFile, err = os.Open(filepath) // Open the saved JPEG file for decoding
+// 	if err != nil {
+// 		return fmt.Errorf("error opening converted JPEG: %v", err)
+// 	}
+// 	if useFancyDecoding {
+// 		// Use fancy decoding options
+// 		decodingOptions := &jpegli.DecodingOptions{
+// 			FancyUpsampling: true,
+// 			BlockSmoothing:  true,
+// 		}
+// 		img, err = jpegli.DecodeWithOptions(origFile, decodingOptions)
+// 		if err != nil {
+// 			return fmt.Errorf("error decoding image with fancy options: %v", err)
+// 		}
+// 	} else {
+// 		// Use standard decoding
+// 		img, err = jpeg.Decode(origFile)
+// 		if err != nil {
+// 			return fmt.Errorf("error decoding image: %v", err)
+// 		}
+// 	}
+
+// 	// Create a buffer to hold the new image data
+// 	var buf bytes.Buffer
+
+// 	checkJpegliQualityFlags()
+
+// 	options := &jpegli.EncodingOptions{
+// 		Quality: jpegliQuality, // Use the quality set from command-line arguments
+// 	}
+// 	if err := jpegli.Encode(&buf, img, options); err != nil {
+// 		return fmt.Errorf("error encoding image with jpegli: %v", err)
+// 	}
+
+// 	// Get the new size after encoding
+// 	newSize := int64(buf.Len())
+
+// 	// Compare sizes and calculate the difference
+// 	sizeDifference := newSize - origSize
+// 	percentageChange := 0.0
+// 	if origSize > 0 {
+// 		percentageChange = (float64(sizeDifference) / float64(origSize)) * 100
+// 	}
+
+// 	// Determine if the file size increased, decreased, or stayed the same
+// 	changeType := highlightStyle.Render("decreased")
+// 	if sizeDifference > 0 {
+// 		changeType = "increased"
+// 	} else if sizeDifference == 0 {
+// 		changeType = "remained the same"
+// 	}
+
+// 	// Output the file sizes and percentage change
+// 	fmt.Printf("Processed image with jpegli: %s\n", filepath)
+// 	fmt.Printf("Original file size: %d bytes\n", origSize)
+// 	fmt.Printf("New file size: %d bytes\n", newSize)
+// 	fmt.Printf("Size difference: %d bytes (%s)\n", sizeDifference, changeType)
+// 	fmt.Printf("Percentage change: %.2f%%\n", percentageChange)
+
+// 	// If the new size is smaller, write it back to the original file
+// 	if newSize < origSize {
+// 		if err := os.WriteFile(filepath, buf.Bytes(), 0644); err != nil {
+// 			return fmt.Errorf("error writing processed image: %v", err)
+// 		}
+// 		fmt.Println("New image file saved as it is smaller than the original.")
+// 	} else {
+// 		fmt.Println("New file size is not smaller. Keeping original file.")
+// 	}
+
+// 	return nil
+// }
+
+func processImage(filepath string) error {
+	format, err := identifyFormat(filepath)
 	if err != nil {
 		return fmt.Errorf("error identifying image format: %v", err)
 	}
-
 	fmt.Printf("Detected image format: %s\n", format)
 
-	// Open the original file
-	origFile, err := os.Open(filepath)
+	origFile, err := openFile(filepath)
 	if err != nil {
-		return fmt.Errorf("error opening image file: %v", err)
+		return err
 	}
 	defer origFile.Close()
 
-	// Declare the img variable
-	var img image.Image
-
-	// Get the original file size
-	origInfo, err := origFile.Stat()
+	origSize, img, err := handleOriginalFile(origFile, format)
 	if err != nil {
-		return fmt.Errorf("error getting original file info: %v", err)
+		return err
 	}
-	origSize := origInfo.Size()
 
-	if format == "png" {
-		// Decode PNG images first
-		img, err = png.Decode(origFile)
-		if err != nil {
-			return fmt.Errorf("error decoding PNG image: %v", err)
-		}
-		// Convert PNG to JPEG and save it
-		if err := convertToJpeg(img, filepath); err != nil {
-			return err // Handle conversion errors
-		}
+	if err := convertImageIfNeeded(format, filepath, &img); err != nil {
+		return err
 	}
-	// Now, open the newly created JPEG file
-	origFile, err = os.Open(filepath) // Open the saved JPEG file for decoding
+
+	origFile, err = os.Open(filepath)
 	if err != nil {
 		return fmt.Errorf("error opening converted JPEG: %v", err)
 	}
-	if useFancyDecoding {
-		// Use fancy decoding options
-		decodingOptions := &jpegli.DecodingOptions{
-			FancyUpsampling: true,
-			BlockSmoothing:  true,
-		}
-		img, err = jpegli.DecodeWithOptions(origFile, decodingOptions)
+
+	img, err = decodeImage(origFile, useFancyDecoding)
+	if err != nil {
+		return err
+	}
+
+	return encodeAndCompareSizes(filepath, origSize, img)
+
+}
+
+func identifyFormat(filepath string) (string, error) {
+	return IdentifyImageFormat(filepath)
+}
+
+func openFile(filepath string) (*os.File, error) {
+	return os.Open(filepath)
+}
+
+func handleOriginalFile(origFile *os.File, format string) (int64, image.Image, error) {
+	origInfo, err := origFile.Stat()
+	if err != nil {
+		return 0, nil, fmt.Errorf("error getting original file info: %v", err)
+	}
+	origSize := origInfo.Size()
+
+	var img image.Image
+	if format == "png" {
+		img, err = png.Decode(origFile)
 		if err != nil {
-			return fmt.Errorf("error decoding image with fancy options: %v", err)
+			return 0, nil, fmt.Errorf("error decoding PNG image: %v", err)
 		}
+	}
+
+	return origSize, img, nil
+}
+
+func convertImageIfNeeded(format, filepath string, img *image.Image) error {
+	if format == "png" {
+		return convertToJpeg(*img, filepath)
+	}
+	return nil
+}
+
+func decodeImage(origFile *os.File, useFancy bool) (image.Image, error) {
+	var img image.Image
+	var err error
+	if useFancy {
+		options := &jpegli.DecodingOptions{FancyUpsampling: true, BlockSmoothing: true}
+		img, err = jpegli.DecodeWithOptions(origFile, options)
 	} else {
-		// Use standard decoding
 		img, err = jpeg.Decode(origFile)
-		if err != nil {
-			return fmt.Errorf("error decoding image: %v", err)
-		}
 	}
+	if err != nil {
+		return nil, fmt.Errorf("error decoding image: %v", err)
+	}
+	return img, nil
+}
 
-	// Create a buffer to hold the new image data
+func encodeAndCompareSizes(filepath string, origSize int64, img image.Image) error {
 	var buf bytes.Buffer
-
-	checkJpegliQualityFlags()
-
-	options := &jpegli.EncodingOptions{
-		Quality: jpegliQuality, // Use the quality set from command-line arguments
-	}
+	options := &jpegli.EncodingOptions{Quality: jpegliQuality}
 	if err := jpegli.Encode(&buf, img, options); err != nil {
 		return fmt.Errorf("error encoding image with jpegli: %v", err)
 	}
 
-	// Get the new size after encoding
 	newSize := int64(buf.Len())
-
-	// Compare sizes and calculate the difference
 	sizeDifference := newSize - origSize
 	percentageChange := 0.0
 	if origSize > 0 {
 		percentageChange = (float64(sizeDifference) / float64(origSize)) * 100
 	}
 
-	// Determine if the file size increased, decreased, or stayed the same
 	changeType := highlightStyle.Render("decreased")
 	if sizeDifference > 0 {
 		changeType = "increased"
@@ -1223,14 +1478,12 @@ func processImage(filepath string) error {
 		changeType = "remained the same"
 	}
 
-	// Output the file sizes and percentage change
 	fmt.Printf("Processed image with jpegli: %s\n", filepath)
 	fmt.Printf("Original file size: %d bytes\n", origSize)
 	fmt.Printf("New file size: %d bytes\n", newSize)
 	fmt.Printf("Size difference: %d bytes (%s)\n", sizeDifference, changeType)
 	fmt.Printf("Percentage change: %.2f%%\n", percentageChange)
 
-	// If the new size is smaller, write it back to the original file
 	if newSize < origSize {
 		if err := os.WriteFile(filepath, buf.Bytes(), 0644); err != nil {
 			return fmt.Errorf("error writing processed image: %v", err)
@@ -1519,53 +1772,53 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "up":
+		return m.handleKeyMsg(msg)
+	case tea.MouseEvent:
+		return m.handleMouseEvent(msg)
+	}
+	return m, nil
+}
+
+func (m model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case "down":
+		if m.cursor < len(m.records)-1 {
+			m.cursor++
+		}
+	case "pgup":
+		m.cursor -= 10
+		if m.cursor < 0 {
+			m.cursor = 0
+		}
+	case "pgdown":
+		m.cursor += 10
+		if m.cursor >= len(m.records) {
+			m.cursor = len(m.records) - 1
+		}
+	case "home":
+		m.cursor = 0
+	case "end":
+		m.cursor = len(m.records) - 1
+	case "q":
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m model) handleMouseEvent(msg tea.MouseEvent) (tea.Model, tea.Cmd) {
+	if msg.IsWheel() {
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
 			if m.cursor > 0 {
 				m.cursor--
 			}
-
-		case "down":
+		case tea.MouseButtonWheelDown:
 			if m.cursor < len(m.records)-1 {
 				m.cursor++
-			}
-
-		case "pgup":
-			// Page Up: Move up by a fixed number of lines (e.g., 10)
-			m.cursor -= 10
-			if m.cursor < 0 {
-				m.cursor = 0
-			}
-
-		case "pgdown":
-			// Page Down: Move down by a fixed number of lines (e.g., 10)
-			m.cursor += 10
-			if m.cursor >= len(m.records) {
-				m.cursor = len(m.records) - 1
-			}
-
-		case "home":
-			// Home: Jump to the first record
-			m.cursor = 0
-
-		case "end":
-			// End: Jump to the last record
-			m.cursor = len(m.records) - 1
-
-		case "q":
-			return m, tea.Quit
-		}
-	case tea.MouseEvent:
-		if msg.IsWheel() {
-			switch msg.Button {
-			case tea.MouseButtonWheelUp:
-				if m.cursor > 0 {
-					m.cursor--
-				}
-			case tea.MouseButtonWheelDown:
-				if m.cursor < len(m.records)-1 {
-					m.cursor++
-				}
 			}
 		}
 	}
@@ -1683,10 +1936,25 @@ func showHistoryWithTablewriter() {
 // Checks if "-jp" was passed in the command-line arguments
 func checkJPFlag() {
 	for _, arg := range os.Args[1:] {
-		// if arg == "-jp" {
 		if arg == "-jp" || arg == "--jpegli" {
 			isJPMode = true
 			break
 		}
+	}
+}
+
+// Checks if "-C" "--clear-cache" was passed in the command-line arguments
+func checkCCacheFlag() {
+	// Check if there are any flags related to cache mode
+	for _, arg := range os.Args[1:] {
+		if arg == "-C" || arg == "--clear-cache" {
+			isCCacheMode = false
+			break // Exit the loop once we find the flag
+		}
+	}
+
+	// Check if there are additional parameters
+	if len(os.Args) > 2 { // More than just the program name and one flag
+		isCCacheMode = true
 	}
 }
