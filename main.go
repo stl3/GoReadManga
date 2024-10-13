@@ -919,10 +919,10 @@ func checkIfPDFExist(manga MangaResult, chapterTitle string, cacheDir string, cu
 
 	// Return if PDF already exists
 	if _, err := os.Stat(pdfPath); err == nil {
-		// fmt.Printf(infoStyle.Render("PDF already exists: %s\n"), pdfPath)
+		fmt.Printf(infoStyle.Render("PDF already exists: %s\n"), pdfPath)
 		openPDF(pdfPath)
 	} else {
-		fmt.Printf(infoStyle.Render("PDF doesn't exist: %s\n", pdfPath))
+		// fmt.Printf(infoStyle.Render("PDF doesn't exist: %s\n", pdfPath))
 		openChapter(manga, currentChapter)
 	}
 }
