@@ -123,36 +123,8 @@ func init() {
 
 	checkJPFlag()
 	checkCCacheFlag()
-	//////////////////////////////////////////////////////////
-	// Only for my personal config
-	// Get the hostname of the machine
-	hostname, err := os.Hostname()
-	if err != nil {
-		fmt.Println("Error retrieving hostname:", err)
-		return
-	}
-	// fmt.Println("Hostname is:", hostname) // Just for debugging
-	// Check if the OS is Windows and the hostname matches "7950X3D" or "DEMONSEED-W10"
-	if runtime.GOOS == "windows" && (hostname == "7950x3d" || hostname == "DemonSeed-W10") {
-		// Check if the T: drive is available
-		if _, err := os.Stat("T:/"); os.IsNotExist(err) {
-			// Fallback to tempDir if T: drive is not available
-			fmt.Println("T: Drive does not exist:", err)
-			tempDir := os.TempDir()
-			cacheDir = filepath.Join(tempDir, ".cache", "goreadmanga")
-		} else {
-			cacheDir = "T:/.cache/goreadmanga"
-		}
-	} else {
-		// Fallback to tempDir for non-matching hostnames or non-Windows OS
-		tempDir := os.TempDir()
-		cacheDir = filepath.Join(tempDir, ".cache", "goreadmanga")
-	}
-	/////////////////////////////////////////////////////////////
-	// When distributing public
-	// // tempDir := os.TempDir()
-	// // cacheDir = filepath.Join(tempDir, ".cache", "goreadmanga")
-	////////////////////////////////////////////////////////////
+	tempDir := os.TempDir()
+	cacheDir = filepath.Join(tempDir, ".cache", "goreadmanga")
 }
 
 func main() {
