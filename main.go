@@ -34,12 +34,11 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/andybalholm/brotli"
-	"github.com/olekukonko/tablewriter"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/gen2brain/jpegli"
 	"github.com/jung-kurt/gofpdf"
+	fzf "github.com/koki-develop/go-fzf"
 	"github.com/schollz/progressbar/v3"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
@@ -74,47 +73,31 @@ type model struct {
 }
 
 var (
-	cacheDir         string // Directory to hold files, preferably temp
-	currentManga     string
-	servers          = []string{"server2", "server1"} // Switch between content servers serving media
-	contentServer    string
-	isJPMode         bool        // check whether user wants jpegli enabled
-	isCCacheMode     bool        // This check is done so we don't print storage size when inside program since it is called in inputControls()
-	useFancyDecoding      = true // Flag for toggling decoding method
-	jpegliQuality    int  = 85   // Default quality for jpegli encoding
-	titleStyle            = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF79C6"))
-	titleStyleWithBg      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF79C6")).Background(lipgloss.Color("#00194f"))
-	// titleStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFEB3B"))
-	subtitleStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#8BE9FD"))
-	textStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#F8F8F2"))
-	infoStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#ebeb00"))
-	highlightStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B"))
-	cyanColor      = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FFFF"))
-	inputStyle     = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#FFB86C"))
-	versionStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#FFB86C")).
-			Background(lipgloss.Color("#282A36")).
-			Padding(0, 2) // Adds horizontal padding to the version text
-	headerStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#8BE9FD")). // Light blue header
-			Background(lipgloss.Color("#282A36")).
-			Padding(0, 2)
-	resultStyle                                        = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#50FA7B")). // Green for results
-			Padding(0, 2)
-	indexStyle                                        = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FF79C6")). // Pink for index numbers
-			PaddingRight(1)
-	bracketStyle = lipgloss.NewStyle().
-		// Foreground(lipgloss.Color("#FF79C6")) // Pink for brackets, no padding
-		Foreground(lipgloss.Color("#FF79C6")) // Pink for brackets, no padding
-	// chapterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#BD93F9"))
-	chapterStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#95fb17"))
-	chapterStyleWithBG = lipgloss.NewStyle().Foreground(lipgloss.Color("#95fb17")).Background(lipgloss.Color("#282A36"))
+	cacheDir           string // Directory to hold files, preferably temp
+	currentManga       string
+	servers            = []string{"server2", "server1"} // Switch between content servers serving media
+	contentServer      string
+	isJPMode           bool        // check whether user wants jpegli enabled
+	isCCacheMode       bool        // This check is done so we don't print storage size when inside program since it is called in inputControls()
+	useFancyDecoding        = true // Flag for toggling decoding method
+	jpegliQuality      int  = 85   // Default quality for jpegli encoding
+	lightMagentaStyle       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF79C6"))
+	lightMagentaWithBg      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF79C6")).Background(lipgloss.Color("#00194f"))
+	lightCyanStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("#8BE9FD"))
+	textStyle               = lipgloss.NewStyle().Foreground(lipgloss.Color("#F8F8F2"))
+	redStyle                = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000"))
+	magentaStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF00FF"))
+	yellowStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("#ebeb00"))
+	greenStyle              = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B"))
+	cyanColor               = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FFFF"))
+	inputStyle              = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFB86C"))
+	versionStyle            = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFB86C")).Background(lipgloss.Color("#282A36")).Padding(0, 2) // Adds horizontal padding to the version text
+	headerStyle             = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#8BE9FD")).Background(lipgloss.Color("#282A36")).Padding(0, 2)
+	resultStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Padding(0, 2)
+	indexStyle              = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF79C6")).PaddingRight(1)
+	bracketStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF79C6"))
+	chapterStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("#95fb17"))
+	chapterStyleWithBG      = lipgloss.NewStyle().Foreground(lipgloss.Color("#95fb17")).Background(lipgloss.Color("#282A36"))
 )
 
 func init() {
@@ -123,8 +106,7 @@ func init() {
 
 	checkJPFlag()
 	checkCCacheFlag()
-	tempDir := os.TempDir()
-	cacheDir = filepath.Join(tempDir, ".cache", "goreadmanga")
+	checkCacheDir()
 }
 
 func main() {
@@ -162,12 +144,16 @@ func handleArguments(args []string) {
 		showVersion()
 	case "-H", "--history":
 		showHistory()
-	case "-hb", "--historyb":
-		lookHistory()
-	case "-tr", "--historytr":
-		showHistoryWithTablewriter()
+	case "-bh", "--browse-history":
+		showHistoryWithFzf()
 	case "-r", "--resume":
 		openLastSession(historyFile)
+	case "-od", "--opendir":
+		checkCacheDir()
+		err := openDirectory(cacheDir)
+		if err != nil {
+			fmt.Println("Error opening directory:", err)
+		}
 	case "-c", "--cache-size":
 		showCacheSize()
 	case "-C", "--clear-cache":
@@ -178,21 +164,21 @@ func handleArguments(args []string) {
 }
 
 func showHelp() {
-	title := titleStyle.Render("goreadmanga " + version + " (github.com/stl3/goreadmanga)")
-	subtitle := subtitleStyle.Render("App for finding manga via the terminal")
-	usage := highlightStyle.Render("Usage:")
-	options := highlightStyle.Render("Options:")
+	title := lightMagentaStyle.Render("goreadmanga " + version + " (github.com/stl3/GoReadManga)")
+	subtitle := lightCyanStyle.Render("App for finding manga via the terminal")
+	usage := greenStyle.Render("Usage:")
+	options := greenStyle.Render("Options:")
 	optionText := textStyle.Render(`
-  -h, --help           Print this help page
-  -v, --version        Print version number
-  -jp --jpegli         Use jpegli to re-encode jpegs
-  -q --quality		 Set quality to use with jpegli encoding (default: 85)
-  -H, --history   	 Show last viewed manga entry in history
-  -hb, --historyb      Display history using bubbletea
-  -tr, --historytr     Display history using tablewriter
-  -r, --resume   	  Continue from last session
-  -c, --cache-size     Print cache size (` + cacheDir + `)
-  -C, --clear-cache    Purge cache dir (` + cacheDir + `)
+  -h, --help             Print this help page
+  -v, --version          Print version number
+  -jp, --jpegli          Use jpegli to re-encode jpegs
+  -q, --quality		  Set quality to use with jpegli encoding (default: 85)
+  -H, --history   	   Show last viewed manga entry in history
+  -bh, --browse-history  Browse history file, select and read
+  -r, --resume   	    Continue from last session
+  -od, --opendir         Open pdf dir
+  -c, --cache-size       Print cache size (` + cacheDir + `)
+  -C, --clear-cache      Purge cache dir (` + cacheDir + `)
 `)
 
 	fmt.Printf(`
@@ -652,7 +638,7 @@ func openPDF(pdfPath string) {
 		cmd = exec.Command("open", pdfPath)
 
 	case "windows":
-		// Check if SumatraPDF is available
+		// Check if SumatraPDF is available, just for me
 		if _, err := exec.LookPath("SumatraPDF.exe"); err == nil {
 			cmd = exec.Command("SumatraPDF.exe", "-view", "continuous single page", "-zoom", "fit width", pdfPath)
 		} else {
@@ -673,116 +659,6 @@ func openPDF(pdfPath string) {
 		fmt.Printf("Error opening PDF: %v\n", err)
 	}
 }
-
-// // func inputControls(manga MangaResult, chapters []Chapter, currentChapter Chapter) {
-// // 	// Function to fetch and update the chapter title
-// // 	updateChapterInfo := func(currentChapter Chapter) (string, string) {
-// // 		// Regular expression to match 'chapter-' followed by digits
-// // 		re := regexp.MustCompile(`(chapter-)\d+$`)
-// // 		// Convert the chapter number to a string
-// // 		newChapterNumber := strconv.Itoa(currentChapter.Number)
-// // 		// Replace the chapter number in the URL
-// // 		newCurrentChapterURL := re.ReplaceAllString(currentChapter.URL, "${1}"+newChapterNumber)
-
-// // 		// Fetch the new chapter document
-// // 		doc, err := fetchDocument(newCurrentChapterURL)
-// // 		if err != nil {
-// // 			fmt.Printf("Error fetching chapter images: %v\n", err)
-// // 			return "", ""
-// // 		}
-
-// // 		// Get the updated chapter title
-// // 		chapterTitle := doc.Find(".panel-chapter-info-top h1").Text()
-// // 		return newCurrentChapterURL, chapterTitle
-// // 	}
-
-// // 	// Initial chapter info
-// // 	// currentChapter.URL, chapterTitle := updateChapterInfo(currentChapter)
-// // 	newURL, chapterTitle := updateChapterInfo(currentChapter)
-// // 	currentChapter.URL = newURL // Explicitly assign the new URL to the struct field
-
-// // 	for {
-// // 		/////////////////////////////////////////////
-// // 		// My emoji no color on vscodium (Segoe UI Emoji font issue)
-// // 		// I had fixed this once, but now it's back
-// // 		// Something to do with:
-// // 		// [HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts]
-// // 		// [HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts]
-// // 		// [HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontSubstitutes]
-// // 		// so I am keeping this here for when it does work
-// // 		// fmt.Println(
-// // 		// 	bracketStyle.Render("[") +
-// // 		// 		chapterStyleWithBG.Render("Chapter") +
-// // 		// 		highlightStyle.Render(fmt.Sprintf(" %d/%d", currentChapter.Number, len(chapters))) +
-// // 		// 		bracketStyle.Render("] ") + "▄︻デ══━一 🌟💥 " +
-// // 		// 		titleStyleWithBg.Render(chapterTitle) + " 💥🌟",
-// // 		// )
-// // 		/////////////////////////////////////////////
-// // 		fmt.Println(
-// // 			bracketStyle.Render("[") +
-// // 				chapterStyleWithBG.Render("Chapter") +
-// // 				highlightStyle.Render(fmt.Sprintf(" %d/%d", currentChapter.Number, len(chapters))) +
-// // 				bracketStyle.Render("] ") +
-// // 				titleStyleWithBg.Render("▄︻デ══━一 🌟💥 ", chapterTitle, " 💥🌟"),
-// // 		)
-
-// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("N") + bracketStyle.Render("]") + textStyle.Render(" Next chapter"))
-// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("P") + bracketStyle.Render("]") + textStyle.Render(" Previous chapter"))
-// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("S") + bracketStyle.Render("]") + textStyle.Render(" Select chapter"))
-// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("R") + bracketStyle.Render("]") + textStyle.Render(" Reopen current chapter"))
-// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("A") + bracketStyle.Render("]") + textStyle.Render(" Search another manga"))
-// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("CS") + bracketStyle.Render("]") + textStyle.Render(" Toggle between content server1/2"))
-// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("D") + bracketStyle.Render("]") + textStyle.Render(" Toggle image decoding method [jpegli/normal]"))
-// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("M") + bracketStyle.Render("]") + textStyle.Render(" Toggle jpegli encoding mode [jpegli/normal]"))
-// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("C") + bracketStyle.Render("]") + textStyle.Render(" Clear cache"))
-// // 		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("Q") + bracketStyle.Render("]") + textStyle.Render(" Exit"))
-// // 		showCacheSize()
-// // 		choice := strings.ToLower(promptUser(textStyle.Render("Enter input:")))
-
-// // 		switch choice {
-// // 		case "n":
-// // 			if currentChapter.Number < len(chapters) {
-// // 				// Move directly to the next chapter
-// // 				currentChapter = chapters[currentChapter.Number] // Use currentChapter.Number directly to get the next chapter
-// // 				currentChapter.URL, chapterTitle = updateChapterInfo(currentChapter)
-// // 				checkIfPDFExist(manga, chapterTitle, cacheDir, currentChapter)
-// // 			}
-// // 		case "p":
-// // 			if currentChapter.Number > 1 {
-// // 				// Move directly to the previous chapter
-// // 				currentChapter = chapters[currentChapter.Number-2] // Use currentChapter.Number-2 to get the previous chapter
-// // 				currentChapter.URL, chapterTitle = updateChapterInfo(currentChapter)
-// // 				checkIfPDFExist(manga, chapterTitle, cacheDir, currentChapter)
-// // 			}
-// // 		case "s":
-// // 			currentChapter = selectChapter(chapters)
-// // 			currentChapter.URL, chapterTitle = updateChapterInfo(currentChapter) // Update title and URL
-// // 			checkIfPDFExist(manga, chapterTitle, cacheDir, currentChapter)
-// // 		case "r":
-// // 			checkIfPDFExist(manga, chapterTitle, cacheDir, currentChapter)
-// // 		case "a":
-// // 			searchAndReadManga()
-// // 			return
-// // 		case "cs":
-// // 			changeServerOrder()
-// // 		case "d":
-// // 			toggleDecodingMethod()
-// // 		case "m":
-// // 			isJPMode = !isJPMode
-// // 			if isJPMode {
-// // 				fmt.Println("✔️✔️ ⚡⚡ " + indexStyle.Render("jpegli encoding active") + " ⚡⚡ ✔️✔️") // I wish I could see this in color on my damn ide
-// // 			} else {
-// // 				fmt.Println("❌❌ " + indexStyle.Render("jpegli encoding deactivated") + " ❌❌") // Why don't you show color anymore?
-// // 			}
-// // 		case "c":
-// // 			clearCache()
-// // 		case "q":
-// // 			os.Exit(0)
-// // 		default:
-// // 			fmt.Println(subtitleStyle.Render("Invalid input, please try again."))
-// // 		}
-// // 	}
-// // }
 
 func inputControls(manga MangaResult, chapters []Chapter, currentChapter Chapter) {
 	// Function to fetch and update the chapter title
@@ -806,20 +682,22 @@ func inputControls(manga MangaResult, chapters []Chapter, currentChapter Chapter
 		fmt.Println(
 			bracketStyle.Render("[") +
 				chapterStyleWithBG.Render("Chapter") +
-				highlightStyle.Render(fmt.Sprintf(" %d/%d", currentChapterNumber, totalChapters)) +
+				greenStyle.Render(fmt.Sprintf(" %d/%d", currentChapterNumber, totalChapters)) +
 				bracketStyle.Render("] ") +
-				titleStyleWithBg.Render("▄︻デ══━一 🌟💥 ", chapterTitle, " 💥🌟"),
+				lightMagentaWithBg.Render("▄︻デ══━一 🌟💥 ", chapterTitle, " 💥🌟"),
 		)
-		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("N") + bracketStyle.Render("]") + textStyle.Render(" Next chapter"))
-		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("P") + bracketStyle.Render("]") + textStyle.Render(" Previous chapter"))
-		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("S") + bracketStyle.Render("]") + textStyle.Render(" Select chapter"))
-		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("R") + bracketStyle.Render("]") + textStyle.Render(" Reopen current chapter"))
-		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("A") + bracketStyle.Render("]") + textStyle.Render(" Search another manga"))
-		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("CS") + bracketStyle.Render("]") + textStyle.Render(" Toggle between content server1/2"))
-		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("D") + bracketStyle.Render("]") + textStyle.Render(" Toggle image decoding method [jpegli/normal]"))
-		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("M") + bracketStyle.Render("]") + textStyle.Render(" Toggle jpegli encoding mode [jpegli/normal]"))
-		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("C") + bracketStyle.Render("]") + textStyle.Render(" Clear cache"))
-		fmt.Println(bracketStyle.Render("[") + highlightStyle.Render("Q") + bracketStyle.Render("]") + textStyle.Render(" Exit"))
+		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("N") + bracketStyle.Render("]") + textStyle.Render(" Next chapter"))
+		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("P") + bracketStyle.Render("]") + textStyle.Render(" Previous chapter"))
+		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("S") + bracketStyle.Render("]") + textStyle.Render(" Select chapter"))
+		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("R") + bracketStyle.Render("]") + textStyle.Render(" Reopen current chapter"))
+		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("A") + bracketStyle.Render("]") + textStyle.Render(" Search another manga"))
+		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("BH") + bracketStyle.Render("]") + textStyle.Render(" Browse history, select to read"))
+		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("OD") + bracketStyle.Render("]") + textStyle.Render(" Open PDF dir"))
+		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("CS") + bracketStyle.Render("]") + textStyle.Render(" Toggle between content server1/2"))
+		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("D") + bracketStyle.Render("]") + textStyle.Render(" Toggle image decoding method [jpegli/normal]"))
+		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("M") + bracketStyle.Render("]") + textStyle.Render(" Toggle jpegli encoding mode [jpegli/normal]"))
+		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("C") + bracketStyle.Render("]") + textStyle.Render(" Clear cache"))
+		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("Q") + bracketStyle.Render("]") + textStyle.Render(" Exit"))
 		showCacheSize()
 	}
 
@@ -847,6 +725,14 @@ func inputControls(manga MangaResult, chapters []Chapter, currentChapter Chapter
 		case "a":
 			searchAndReadManga()
 			return
+		case "bh":
+			showHistoryWithFzf()
+		case "od":
+			checkCacheDir()
+			err := openDirectory(cacheDir)
+			if err != nil {
+				fmt.Println("Error opening directory:", err)
+			}
 		case "cs":
 			changeServerOrder()
 		case "d":
@@ -859,7 +745,7 @@ func inputControls(manga MangaResult, chapters []Chapter, currentChapter Chapter
 		case "q":
 			os.Exit(0)
 		default:
-			fmt.Println(subtitleStyle.Render("Invalid input, please try again."))
+			fmt.Println(lightCyanStyle.Render("Invalid input, please try again."))
 		}
 	}
 
@@ -891,7 +777,7 @@ func checkIfPDFExist(manga MangaResult, chapterTitle string, cacheDir string, cu
 
 	// Return if PDF already exists
 	if _, err := os.Stat(pdfPath); err == nil {
-		fmt.Printf(infoStyle.Render("PDF already exists: %s\n"), pdfPath)
+		fmt.Printf(yellowStyle.Render("PDF already exists: %s\n"), pdfPath)
 		openPDF(pdfPath)
 	} else {
 		// fmt.Printf(infoStyle.Render("PDF doesn't exist: %s\n", pdfPath))
@@ -903,9 +789,9 @@ func checkIfPDFExist(manga MangaResult, chapterTitle string, cacheDir string, cu
 func toggleDecodingMethod() {
 	useFancyDecoding = !useFancyDecoding // Toggle the flag
 	if useFancyDecoding {
-		fmt.Println(infoStyle.Render("Using fancy decoding options."))
+		fmt.Println(yellowStyle.Render("Using fancy decoding options."))
 	} else {
-		fmt.Println(infoStyle.Render("Using standard decoding."))
+		fmt.Println(yellowStyle.Render("Using standard decoding."))
 	}
 }
 
@@ -914,11 +800,11 @@ func changeServerOrder() {
 	if servers[0] == "server1" {
 		// Toggle the order
 		servers = []string{"server2", "server1"}
-		fmt.Println(infoStyle.Render("Switched server2"))
+		fmt.Println(yellowStyle.Render("Switched server2"))
 	} else {
 		// Toggle back to the original order
 		servers = []string{"server1", "server2"}
-		fmt.Println(infoStyle.Render("Switched server1"))
+		fmt.Println(yellowStyle.Render("Switched server1"))
 	}
 	// fmt.Println("Switched server order to:", servers)
 }
@@ -1234,117 +1120,6 @@ func processJPImage(filepath string) error {
 	return nil
 }
 
-// func processImage(filepath string) error {
-
-// 	// Identify the image format
-// 	format, err := IdentifyImageFormat(filepath)
-// 	if err != nil {
-// 		return fmt.Errorf("error identifying image format: %v", err)
-// 	}
-
-// 	fmt.Printf("Detected image format: %s\n", format)
-
-// 	// Open the original file
-// 	origFile, err := os.Open(filepath)
-// 	if err != nil {
-// 		return fmt.Errorf("error opening image file: %v", err)
-// 	}
-// 	defer origFile.Close()
-
-// 	// Declare the img variable
-// 	var img image.Image
-
-// 	// Get the original file size
-// 	origInfo, err := origFile.Stat()
-// 	if err != nil {
-// 		return fmt.Errorf("error getting original file info: %v", err)
-// 	}
-// 	origSize := origInfo.Size()
-
-// 	if format == "png" {
-// 		// Decode PNG images first
-// 		img, err = png.Decode(origFile)
-// 		if err != nil {
-// 			return fmt.Errorf("error decoding PNG image: %v", err)
-// 		}
-// 		// Convert PNG to JPEG and save it
-// 		if err := convertToJpeg(img, filepath); err != nil {
-// 			return err // Handle conversion errors
-// 		}
-// 	}
-// 	// Now, open the newly created JPEG file
-// 	origFile, err = os.Open(filepath) // Open the saved JPEG file for decoding
-// 	if err != nil {
-// 		return fmt.Errorf("error opening converted JPEG: %v", err)
-// 	}
-// 	if useFancyDecoding {
-// 		// Use fancy decoding options
-// 		decodingOptions := &jpegli.DecodingOptions{
-// 			FancyUpsampling: true,
-// 			BlockSmoothing:  true,
-// 		}
-// 		img, err = jpegli.DecodeWithOptions(origFile, decodingOptions)
-// 		if err != nil {
-// 			return fmt.Errorf("error decoding image with fancy options: %v", err)
-// 		}
-// 	} else {
-// 		// Use standard decoding
-// 		img, err = jpeg.Decode(origFile)
-// 		if err != nil {
-// 			return fmt.Errorf("error decoding image: %v", err)
-// 		}
-// 	}
-
-// 	// Create a buffer to hold the new image data
-// 	var buf bytes.Buffer
-
-// 	checkJpegliQualityFlags()
-
-// 	options := &jpegli.EncodingOptions{
-// 		Quality: jpegliQuality, // Use the quality set from command-line arguments
-// 	}
-// 	if err := jpegli.Encode(&buf, img, options); err != nil {
-// 		return fmt.Errorf("error encoding image with jpegli: %v", err)
-// 	}
-
-// 	// Get the new size after encoding
-// 	newSize := int64(buf.Len())
-
-// 	// Compare sizes and calculate the difference
-// 	sizeDifference := newSize - origSize
-// 	percentageChange := 0.0
-// 	if origSize > 0 {
-// 		percentageChange = (float64(sizeDifference) / float64(origSize)) * 100
-// 	}
-
-// 	// Determine if the file size increased, decreased, or stayed the same
-// 	changeType := highlightStyle.Render("decreased")
-// 	if sizeDifference > 0 {
-// 		changeType = "increased"
-// 	} else if sizeDifference == 0 {
-// 		changeType = "remained the same"
-// 	}
-
-// 	// Output the file sizes and percentage change
-// 	fmt.Printf("Processed image with jpegli: %s\n", filepath)
-// 	fmt.Printf("Original file size: %d bytes\n", origSize)
-// 	fmt.Printf("New file size: %d bytes\n", newSize)
-// 	fmt.Printf("Size difference: %d bytes (%s)\n", sizeDifference, changeType)
-// 	fmt.Printf("Percentage change: %.2f%%\n", percentageChange)
-
-// 	// If the new size is smaller, write it back to the original file
-// 	if newSize < origSize {
-// 		if err := os.WriteFile(filepath, buf.Bytes(), 0644); err != nil {
-// 			return fmt.Errorf("error writing processed image: %v", err)
-// 		}
-// 		fmt.Println("New image file saved as it is smaller than the original.")
-// 	} else {
-// 		fmt.Println("New file size is not smaller. Keeping original file.")
-// 	}
-
-// 	return nil
-// }
-
 func processImage(filepath string) error {
 	format, err := identifyFormat(filepath)
 	if err != nil {
@@ -1443,9 +1218,9 @@ func encodeAndCompareSizes(filepath string, origSize int64, img image.Image) err
 		percentageChange = (float64(sizeDifference) / float64(origSize)) * 100
 	}
 
-	changeType := highlightStyle.Render("decreased")
+	changeType := greenStyle.Render("decreased")
 	if sizeDifference > 0 {
-		changeType = "increased"
+		changeType = redStyle.Render("increased")
 	} else if sizeDifference == 0 {
 		changeType = "remained the same"
 	}
@@ -1728,181 +1503,162 @@ func openLastSession(filename string) error {
 	return nil
 }
 
-func initialModel() model {
-	records, _ := browseHistory(historyFile)
-	return model{
-		records: records,
-		// cursor:  0,
-		cursor: len(records) - 1, // Set cursor to the last record
-	}
-}
-
-func (m model) Init() tea.Cmd {
-	return nil
-}
-
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		return m.handleKeyMsg(msg)
-	case tea.MouseEvent:
-		return m.handleMouseEvent(msg)
-	}
-	return m, nil
-}
-
-func (m model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "up":
-		if m.cursor > 0 {
-			m.cursor--
-		}
-	case "down":
-		if m.cursor < len(m.records)-1 {
-			m.cursor++
-		}
-	case "pgup":
-		m.cursor -= 10
-		if m.cursor < 0 {
-			m.cursor = 0
-		}
-	case "pgdown":
-		m.cursor += 10
-		if m.cursor >= len(m.records) {
-			m.cursor = len(m.records) - 1
-		}
-	case "home":
-		m.cursor = 0
-	case "end":
-		m.cursor = len(m.records) - 1
-	case "q":
-		return m, tea.Quit
-	}
-	return m, nil
-}
-
-func (m model) handleMouseEvent(msg tea.MouseEvent) (tea.Model, tea.Cmd) {
-	if msg.IsWheel() {
-		switch msg.Button {
-		case tea.MouseButtonWheelUp:
-			if m.cursor > 0 {
-				m.cursor--
-			}
-		case tea.MouseButtonWheelDown:
-			if m.cursor < len(m.records)-1 {
-				m.cursor++
-			}
-		}
-	}
-	return m, nil
-}
-
-func (m model) View() string {
-	// Define styles for different sections
-	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("57")).Bold(true) // Selected row background magenta
-	// defaultStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("7"))                                                // Default white text for non-selected rows
-
-	// Specific colors for selected sections
-	mangaTitleStyleSelected := lipgloss.NewStyle().Foreground(lipgloss.Color("228")).Background(lipgloss.Color("57")).Bold(true)    // Yellow for Manga Title
-	chapterNumberStyleSelected := lipgloss.NewStyle().Foreground(lipgloss.Color("112")).Background(lipgloss.Color("57")).Bold(true) // Green for Chapter Number
-	chapterTitleStyleSelected := lipgloss.NewStyle().Foreground(lipgloss.Color("177")).Background(lipgloss.Color("57")).Bold(true)  // Light purple for Chapter Title
-	chapterUrlStyleSelected := lipgloss.NewStyle().Foreground(lipgloss.Color("87"))                                                 // Bright cyan for selected state
-	timestampStyleSelected := lipgloss.NewStyle().Foreground(lipgloss.Color("103")).Background(lipgloss.Color("57")).Bold(true)     // Cyan for Timestamp
-	// Specific colors for sections
-	mangaTitleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("228"))    // Yellow for Manga Title
-	chapterNumberStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("112")) // Green for Chapter Number
-	chapterTitleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("177"))  // Light purple for Chapter Title
-	chapterUrlStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("177"))    // Soft pink for default state
-
-	timestampStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("103")) // Cyan for Timestamp
-
-	s := "Browse History:\n\n"
-	for i, record := range m.records {
-		var row string
-
-		// Check if it's the currently selected row (with the cursor)
-		if m.cursor == i {
-			row = selectedStyle.Render(fmt.Sprintf(" > %s - Chapter %s: %s %s (%s)",
-				mangaTitleStyleSelected.Render(record.MangaTitle),
-				chapterNumberStyleSelected.Render(fmt.Sprintf("%d", record.ChapterNumber)),
-				chapterTitleStyleSelected.Render(record.ChapterTitle),
-				chapterUrlStyleSelected.Render(record.ChapterPage),
-				timestampStyleSelected.Render(record.Timestamp.Format(time.RFC1123)),
-			))
-		} else {
-			row = fmt.Sprintf("   %s - Chapter %s: %s %s (%s)",
-				mangaTitleStyle.Render(record.MangaTitle),
-				chapterNumberStyle.Render(fmt.Sprintf("%d", record.ChapterNumber)),
-				chapterTitleStyle.Render(record.ChapterTitle),
-				chapterUrlStyle.Render(record.ChapterPage),
-				timestampStyle.Render(record.Timestamp.Format(time.RFC1123)),
-			)
-		}
-
-		s += row + "\n"
-	}
-
-	s += "\nPress 'q' to quit.\n"
-	return s
-}
-
-func lookHistory() {
-	p := tea.NewProgram(initialModel())
-	if _, err := p.Run(); err != nil {
-		fmt.Println("Error running program:", err)
-		os.Exit(1)
-	}
-}
-
-func showHistoryWithTablewriter() {
-	records, err := browseHistory(historyFile)
+func showHistoryWithFzf() {
+	records, err := browseHistory(historyFile) // Replace with actual path
 	if err != nil {
-		fmt.Println("Error fetching browse history:", err)
-		return
+		log.Fatal("Error fetching browse history:", err)
 	}
 
-	// Create a table writer
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"Manga Title", "Chapter", "Chapter Title", "Url", "Date"})
-
-	// 	Explanation of Color Choices:
-	// Header: Bold and Bright Cyan (FgHiCyan) to make the header stand out.
-	// Columns:
-	// Manga Title: Yellow (FgYellow) for visibility and emphasis.
-	// Chapter: Green (FgGreen) for a calming contrast.
-	// Chapter Title: Magenta (FgMagenta) for vibrancy.
-	// URL: Blue (FgBlue) to signify links.
-	// Date: Bright white (FgHiWhite) to keep it neutral but clear.
-	// Set header color: Bright cyan
-
-	table.SetHeaderColor(
-		tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiCyanColor},
-		tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiCyanColor},
-		tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiCyanColor},
-		tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiCyanColor},
-		tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiCyanColor},
-	)
-
-	table.SetColumnColor(
-		tablewriter.Colors{tablewriter.FgYellowColor},  // Manga Title: Yellow
-		tablewriter.Colors{tablewriter.FgGreenColor},   // Chapter: Green
-		tablewriter.Colors{tablewriter.FgMagentaColor}, // Chapter Title: Magenta
-		tablewriter.Colors{tablewriter.FgBlueColor},    // URL: Blue
-		tablewriter.Colors{tablewriter.FgHiWhiteColor}, // Date: White or Gray
-	)
-
-	for _, record := range records {
-		table.Append([]string{
-			record.MangaTitle,
-			fmt.Sprintf("%d", record.ChapterNumber),
-			record.ChapterTitle,
-			record.ChapterPage,
-			record.Timestamp.Format(time.RFC1123),
-		})
+	// Reverse the order of records (newer items at the bottom)
+	for i, j := 0, len(records)-1; i < j; i, j = i+1, j-1 {
+		records[i], records[j] = records[j], records[i]
 	}
 
-	// Render the table to output
-	table.Render()
+	var selectedRecords []int
+
+	// Check if native fzf is available
+	if isFzfAvailable() {
+		fmt.Println("Using native fzf...")
+		selectedRecords, err = selectHistoryWithFzfNative(records)
+	} else {
+		fmt.Println("Using built-in go-fzf...")
+		selectedRecords, err = selectHistoryWithGoFzf(records)
+	}
+
+	if err != nil {
+		log.Fatal("Error selecting history:", err)
+	}
+
+	// Handle the selected entries (printing the selection)
+	for _, i := range selectedRecords {
+		selectedRecord := records[i]
+		fmt.Printf(">: %s, Chapter %d: %s %s\n",
+			magentaStyle.Render(selectedRecord.MangaTitle),
+			selectedRecord.ChapterNumber,
+			selectedRecord.ChapterTitle,
+			selectedRecord.ChapterPage)
+
+		///////////////////////////////////////////////////////
+		manga := MangaResult{Title: selectedRecord.MangaTitle}
+		chapter := Chapter{Number: selectedRecord.ChapterNumber, URL: selectedRecord.ChapterPage}
+		mangaDir := filepath.Join(cacheDir, getModMangaTitle(selectedRecord.MangaTitle))
+		pdfFilename := fmt.Sprintf("%s.pdf", selectedRecord.ChapterTitle)
+		pdfPath := filepath.Join(mangaDir, pdfFilename)
+
+		// Return if PDF already exists
+		if _, err := os.Stat(pdfPath); err == nil {
+			openPDF(pdfPath)
+		} else {
+			images, chapterTitle := scrapeChapterImages(selectedRecord.ChapterPage)
+			pdfPath = downloadAndConvertToPDF(manga, chapter, images, chapterTitle)
+		}
+
+		/////////////////////////////////////////////////////////
+		openPDF(pdfPath)
+
+		// Update the ChapterPage URL for scraping further chapters
+		selectedRecord.ChapterPage = strings.Join(strings.Split(selectedRecord.ChapterPage, "/")[:len(strings.Split(selectedRecord.ChapterPage, "/"))-1], "/")
+		chapters := scrapeChapterList(selectedRecord.ChapterPage)
+
+		if len(chapters) == 0 {
+			fmt.Println("No chapters found. Exiting...")
+			os.Exit(1)
+		}
+
+		inputControls(manga, chapters, chapter)
+		///////////////////////////////////////////////////////
+	}
+}
+
+func selectHistoryWithFzfNative(records []BrowseRecord) ([]int, error) {
+	options := make([]string, len(records))
+	for i, record := range records {
+		options[i] = fmt.Sprintf("%s | %s", record.ChapterTitle, record.Timestamp.Format(time.RFC1123))
+	}
+
+	// Use native fzf
+	cmd := exec.Command("fzf")
+	cmd.Stdin = strings.NewReader(strings.Join(options, "\n"))
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		return nil, err
+	}
+
+	selectedOptions := strings.Split(strings.TrimSpace(out.String()), "\n")
+	var selectedIndices []int
+	for _, selected := range selectedOptions {
+		for i, option := range options {
+			if option == selected {
+				selectedIndices = append(selectedIndices, i)
+				break
+			}
+		}
+	}
+
+	return selectedIndices, nil
+}
+
+func selectHistoryWithGoFzf(records []BrowseRecord) ([]int, error) {
+	// Create custom styles directly in the WithStyles function
+	f, err := fzf.New(
+		fzf.WithInputPosition("bottom"),
+		fzf.WithSelectedPrefix("●"),
+		fzf.WithUnselectedPrefix("◯"),
+		fzf.WithStyles(
+			fzf.WithStylePrompt(fzf.Style{
+				ForegroundColor: "#FFFFFF", // White for the prompt
+				BackgroundColor: "#1E1E1E", // Dark background
+			}),
+			fzf.WithStyleInputPlaceholder(fzf.Style{
+				ForegroundColor: "#AAAAAA", // Light gray for input placeholder
+			}),
+			fzf.WithStyleInputText(fzf.Style{
+				ForegroundColor: "#00FF00", // Green for input text
+				BackgroundColor: "#1E1E1E", // Dark background for input text
+			}),
+			fzf.WithStyleCursorLine(fzf.Style{
+				ForegroundColor: "#00FF00", // Green for input text
+				BackgroundColor: "#1E1E1E", // Dark background for input text
+			}),
+			fzf.WithStyleCursor(fzf.Style{
+				ForegroundColor: "#00ADD8", // Cyan for cursor
+			}),
+			fzf.WithStyleSelectedPrefix(fzf.Style{
+				ForegroundColor: "#00ADD8", // Cyan for selected prefix
+			}),
+			fzf.WithStyleUnselectedPrefix(fzf.Style{
+				ForegroundColor: "#FFFFFF", // White for unselected prefix
+			}),
+			fzf.WithStyleMatches(fzf.Style{
+				ForegroundColor: "#00ADD8", // Cyan for matched characters
+			}),
+		),
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	options := make([]string, len(records))
+	for i, record := range records {
+		options[i] = fmt.Sprintf("%s | %s", record.ChapterTitle, record.Timestamp.Format(time.RFC1123))
+	}
+
+	idxs, err := f.Find(options, func(i int) string {
+		return options[i]
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return idxs, nil
+}
+
+func isFzfAvailable() bool {
+	_, err := exec.LookPath("fzf")
+	return err == nil
 }
 
 // Checks if "-jp" was passed in the command-line arguments
@@ -1928,5 +1684,33 @@ func checkCCacheFlag() {
 	// Check if there are additional parameters
 	if len(os.Args) > 2 { // More than just the program name and one flag
 		isCCacheMode = true
+	}
+}
+
+func checkCacheDir() {
+
+	tempDir := os.TempDir()
+	cacheDir = filepath.Join(tempDir, ".cache", "goreadmanga")
+
+}
+
+func openDirectory(cacheDir string) error {
+	// Get the operating system type
+	absPath, _ := filepath.Abs(cacheDir) // Convert to absolute path
+	switch runtime.GOOS {
+	case "linux":
+		// Use xdg-open for Linux
+		return exec.Command("xdg-open", absPath).Start()
+	case "android":
+		// Use termux-open for Android (Termux)
+		return exec.Command("termux-open", absPath).Start()
+	case "darwin":
+		// Use open for macOS
+		return exec.Command("open", absPath).Start()
+	case "windows":
+		// Use explorer for Windows
+		return exec.Command("explorer", absPath).Start()
+	default:
+		return fmt.Errorf("unsupported platform")
 	}
 }
