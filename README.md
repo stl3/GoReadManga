@@ -11,12 +11,12 @@ Find, read, maybe.
 - 📄 **Vertical Image Splitting**: Split tall vertical images into multiple pages without gaps.
 - 🌐 **Horizontal Image Splitting**: Split wide horizontal images into multiple pages.
 - 📊 **Viewing Statistics**: Get basic statistics on your reading habits.
-- 🎨 **Customizable PDF Background**: Change the color of empty space in PDFs (default: black).
 - 🔄 **Server Switching**: Easily switch between different content servers.
 - 🧹 **Cache Management**: Clear cache easily (it grows fast!).
 - 🔍 **Upcoming Features**:
   - Similar title suggestions for easier querying.
   - Command line option to specify output directory.
+  - 🎨 **Customizable PDF Background**: Change the color of empty space in PDFs (default: black).
 - 💡 **More to Come**: Stay tuned for additional features as they develop!
 
 
