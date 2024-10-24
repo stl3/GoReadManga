@@ -41,12 +41,13 @@ import (
 	fzf "github.com/koki-develop/go-fzf"
 	"github.com/schollz/progressbar/v3"
 	"golang.org/x/image/webp"
+	"golang.org/x/net/proxy"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
 )
 
 const (
-	version     = "0.1.46"
+	version     = "0.1.47"
 	historyFile = "goreadmanga_history.json"
 )
 
@@ -90,30 +91,32 @@ var (
 	currentManga       string
 	servers            = []string{"server2", "server1"} // Switch between content servers serving media
 	contentServer      string
-	isJPMode           bool        // check whether user wants jpegli enabled
-	isWideSplitMode    bool        // check whether user wants to split wide images or scale to A4
-	isCCacheMode       bool        // This check is done so we don't print storage size when inside program since it is called in inputControls()
-	useFancyDecoding        = true // Flag for toggling decoding method
-	jpegliQuality      int  = 85   // Default quality for jpegli encoding
-	lightMagentaStyle       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF79C6"))
-	lightMagentaWithBg      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF79C6")).Background(lipgloss.Color("#00194f"))
-	lightCyanStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("#8BE9FD"))
-	textStyle               = lipgloss.NewStyle().Foreground(lipgloss.Color("#F8F8F2"))
-	redStyle                = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000"))
-	magentaStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF00FF"))
-	yellowStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("#ebeb00"))
-	greenStyle              = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B"))
-	cyanColor               = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FFFF"))
-	inputStyle              = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFB86C"))
-	versionStyle            = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFB86C")).Background(lipgloss.Color("#282A36")).Padding(0, 2) // Adds horizontal padding to the version text
-	headerStyle             = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#8BE9FD")).Background(lipgloss.Color("#282A36")).Padding(0, 2)
-	resultStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Padding(0, 2)
-	indexStyle              = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF79C6")).PaddingRight(1)
-	bracketStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF79C6"))
-	chapterStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("#95fb17"))
-	chapterStyleWithBG      = lipgloss.NewStyle().Foreground(lipgloss.Color("#95fb17")).Background(lipgloss.Color("#282A36"))
-	yellowFGbrownBG         = lipgloss.NewStyle().Foreground(lipgloss.Color("#95fb17")).Background(lipgloss.Color("#282A36"))
-	redFGblackBG            = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f56")).Background(lipgloss.Color("#1e1e1e"))
+	isJPMode           bool         // check whether user wants jpegli enabled
+	isWideSplitMode    bool         // check whether user wants to split wide images or scale to A4
+	isCCacheMode       bool         // This check is done so we don't print storage size when inside program since it is called in inputControls()
+	useFancyDecoding        = false // Flag for toggling decoding method
+	jpegliQuality      int  = 85    // Default quality for jpegli encoding
+	socksProxyMode     bool
+	socksProxy         string
+	lightMagentaStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF79C6"))
+	lightMagentaWithBg = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF79C6")).Background(lipgloss.Color("#00194f"))
+	lightCyanStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#8BE9FD"))
+	textStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("#F8F8F2"))
+	redStyle           = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000"))
+	magentaStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF00FF"))
+	yellowStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("#ebeb00"))
+	greenStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B"))
+	cyanColor          = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FFFF"))
+	inputStyle         = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFB86C"))
+	versionStyle       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFB86C")).Background(lipgloss.Color("#282A36")).Padding(0, 2) // Adds horizontal padding to the version text
+	headerStyle        = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#8BE9FD")).Background(lipgloss.Color("#282A36")).Padding(0, 2)
+	resultStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Padding(0, 2)
+	indexStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF79C6")).PaddingRight(1)
+	bracketStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF79C6"))
+	chapterStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#95fb17"))
+	chapterStyleWithBG = lipgloss.NewStyle().Foreground(lipgloss.Color("#95fb17")).Background(lipgloss.Color("#282A36"))
+	yellowFGbrownBG    = lipgloss.NewStyle().Foreground(lipgloss.Color("#95fb17")).Background(lipgloss.Color("#282A36"))
+	redFGblackBG       = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f56")).Background(lipgloss.Color("#1e1e1e"))
 	// blueFGpurpleBG          = lipgloss.NewStyle().Foreground(lipgloss.Color("#005f87")).Background(lipgloss.Color("#4B0082"))
 	blueFGpurpleBG   = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffff00")).Background(lipgloss.Color("#00194f"))
 	greenFGwhiteBG   = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00")).Background(lipgloss.Color("#ffffff"))
@@ -127,6 +130,8 @@ func init() {
 
 	checkJPFlag()
 	checkWideSplitFlag()
+	checkDecodeFlag()
+	checkProxyFlag()
 	checkCCacheFlag()
 	checkCacheDir()
 }
@@ -166,6 +171,8 @@ func handleArguments(args []string) {
 		showVersion()
 	case "-ws", "--wide-split":
 		isWideSplitMode = true
+	// case "-dj", "--decode-jpegli": // Checked via init()
+	// 	useFancyDecoding = true
 	case "-H", "--history":
 		showHistory()
 	case "-bh", "--browse-history":
@@ -237,6 +244,7 @@ func showHelp() {
   -jp, --jpegli          Use jpegli to re-encode jpegs
   -q, --quality		  Set quality to use with jpegli encoding (default: 85)
   -ws, --wide-split      Split images that are too wide and maximize vertically
+  -ph, --proxy-host	  Socks5 proxy support [server:port]
   -H, --history   	   Show last viewed manga entry in history
   -bh, --browse-history  Browse history file, select and read
   -st, --stats           Show history statistics
@@ -268,7 +276,7 @@ func showVersion() {
 func showCacheSize() {
 	size, err := getDirSize(cacheDir)
 	if err != nil {
-		fmt.Printf("Error or cache already empty: %v\n", err)
+		// fmt.Printf("Error or cache already empty: %v\n", err)
 		return
 	}
 	fmt.Printf("Cache size: %s (%s)\n", formatSize(size), cacheDir)
@@ -856,12 +864,20 @@ func inputControls(manga MangaResult, chapters []Chapter, currentChapter Chapter
 		}
 		serverConfig := servers[0]
 		jpegliQualityConfig = fmt.Sprintf("%d", jpegliQuality)
-		fmt.Println(cyanColor.Render("Current options: ") +
+
+		currentOptions := cyanColor.Render("Current options: ") +
 			greenStyle.Render("Server") + bracketStyle.Render("[") + chapterStyleWithBG.Render(serverConfig) + bracketStyle.Render("] ") +
 			greenStyle.Render("Decoding") + bracketStyle.Render("[") + chapterStyleWithBG.Render(decodeConfig) + bracketStyle.Render("] ") +
-			greenStyle.Render("Encode") + bracketStyle.Render("[") + chapterStyleWithBG.Render(jpConfig) + bracketStyle.Render("] ") +
-			greenStyle.Render("Quality") + bracketStyle.Render("[") + chapterStyleWithBG.Render(jpegliQualityConfig) + bracketStyle.Render("] ") +
-			greenStyle.Render("Wide-split") + bracketStyle.Render("[") + chapterStyleWithBG.Render(widesplitConfig) + bracketStyle.Render("] "))
+			greenStyle.Render("Encode") + bracketStyle.Render("[") + chapterStyleWithBG.Render(jpConfig) + bracketStyle.Render("] ")
+
+		if isJPMode { // Only show quality options when jpegli is used
+			currentOptions += greenStyle.Render("Quality") + bracketStyle.Render("[") + chapterStyleWithBG.Render(jpegliQualityConfig) + bracketStyle.Render("] ")
+		}
+
+		currentOptions += greenStyle.Render("Wide-split") + bracketStyle.Render("[") + chapterStyleWithBG.Render(widesplitConfig) + bracketStyle.Render("] ")
+
+		fmt.Println(currentOptions)
+
 	}
 
 	// Function to handle chapter navigation
@@ -1184,6 +1200,7 @@ func tryBase64Decode(encoded string) (string, error) {
 }
 
 func downloadFile(urlStr, filepath string) error {
+
 	// Print the URL if -jp is enabled
 	printJPUrl(urlStr)
 	// Check if the URL string is Base64 encoded.
@@ -1194,35 +1211,44 @@ func downloadFile(urlStr, filepath string) error {
 		}
 		urlStr = decodedUrl
 	}
-	// ///////////////TOR PROXY/////////////////////
-	// // Set up the SOCKS5 proxy at localhost:347
-	// socksProxy := "localhost:347"
-	// dialer, err := proxy.SOCKS5("tcp", socksProxy, nil, proxy.Direct)
-	// if err != nil {
-	// 	return fmt.Errorf("error setting up SOCKS5 proxy: %v", err)
-	// }
 
-	// // Create a custom transport with the SOCKS5 dialer
-	// transport := &http.Transport{
-	// 	Dial: dialer.Dial,
-	// }
+	var (
+		client *http.Client
+		req    *http.Request
+		err    error
+	)
 
-	// // Create a client using the transport
-	// client := &http.Client{
-	// 	Transport: transport,
-	// }
+	if socksProxyMode {
+		/////////////////socks5 PROXY/////////////////////
 
-	// req, err := http.NewRequest("GET", urlStr, nil)
-	// if err != nil {
-	// 	return fmt.Errorf("error creating request: %v", err)
-	// }
-	/////////////////////////////////////////////
-	// Disable if using proxy
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", urlStr, nil)
+		dialer, err := proxy.SOCKS5("tcp", socksProxy, nil, proxy.Direct)
+		if err != nil {
+			return fmt.Errorf("error setting up SOCKS5 proxy: %v", err)
+		}
+
+		// Create a custom transport with the SOCKS5 dialer
+		transport := &http.Transport{
+			Dial: dialer.Dial,
+		}
+
+		// Create a client using the transport
+		client = &http.Client{
+			Transport: transport,
+		}
+
+	} else {
+		// Disable proxy mode
+		client = &http.Client{}
+	}
+
+	// Create a request, outside the if-else block since it's common
+	req, err = http.NewRequest("GET", urlStr, nil)
 	if err != nil {
 		return fmt.Errorf("error creating request: %v", err)
 	}
+
+	// Now both `client` and `req` are accessible here
+
 	// Set headers
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/jxl,image/webp,image/png,image/svg+xml,*/*;q=0.8")
@@ -1847,11 +1873,35 @@ func checkJPFlag() {
 	}
 }
 
-// Checks if "-jp" was passed in the command-line arguments
 func checkWideSplitFlag() {
 	for _, arg := range os.Args[1:] {
 		if arg == "-ws" || arg == "--wide-split" {
 			isWideSplitMode = true
+			break
+		}
+	}
+}
+
+func checkDecodeFlag() {
+	for _, arg := range os.Args[1:] {
+		if arg == "-dj" || arg == "--decode-jpegli" {
+			useFancyDecoding = true
+			break
+		}
+	}
+}
+
+func checkProxyFlag() {
+	// Loop through command-line arguments
+	for i, arg := range os.Args[1:] {
+		if arg == "-ph" || arg == "--proxy-host" {
+			// Check if the next argument exists and is the proxy address
+			if i+1 < len(os.Args[1:]) {
+				socksProxy = os.Args[i+2] // Get the proxy server IP:port
+				socksProxyMode = true
+			} else {
+				fmt.Println("Error: -ph flag provided but no proxy address specified")
+			}
 			break
 		}
 	}
