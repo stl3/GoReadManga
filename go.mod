@@ -1,4 +1,4 @@
-module GoReadManga
+module github.com/stl3/GoReadManga
 
 go 1.23.1
 
