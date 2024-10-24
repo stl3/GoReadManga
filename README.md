@@ -24,7 +24,9 @@ Find, read, maybe.
 
 
 ### Commands in program
-![image](https://github.com/user-attachments/assets/1d2030e8-a938-468b-8362-72672903afd3)
+![image](https://github.com/user-attachments/assets/c03c3c5f-5fc0-4cbf-8250-b9416af07c18)
+
+
 
 
 | Command | Description |
