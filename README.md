@@ -3,28 +3,35 @@ Find, read, maybe.
 
 ### Features ✨
 
-- 🚀 **Convenient & Fast**: Quick fetching and searching for manga.
+- 🚀 **Convenient & Fast**: Quickly fetch and search for manga with ease.
 - 🔄 **Resume Where You Left Off**: Easily continue your reading session.
-- 🕵️‍♂️ **Browse History**: Access previously viewed material using natively installed `fzf` (or the built-in `fzf` search if not installed).
-- 📁 **PDF Storage**: Generated PDFs are stored in a directory on your OS's temp directory (Windows/Android/Linux/Darwin).
-- 🖼️ **Image Processing**: Choose between using `jpegli` or the standard JPEG library for encoding/decoding images.
-- 📄 **Vertical Image Splitting**: Split tall vertical images into multiple pages without gaps.
-- 🌐 **Horizontal Image Splitting**: Split wide horizontal images into multiple pages.
+- 🕵️‍♂️ **Browse History**: Access previously viewed material using natively installed `fzf`, or utilize the built-in `fzf` search if not installed.
+- 📁 **PDF Storage**: Generated PDFs are stored in your OS's temp directory (compatible with Windows, Android, Linux, and Darwin).
+- 🖼️ **Image Processing**: Choose between `jpegli` or the standard JPEG library for efficient encoding/decoding of images.
+- 📄 **Vertical Image Splitting**: Split tall vertical images into multiple pages without any gaps.
+- 🌐 **Horizontal Image Splitting**: Split wide horizontal images into multiple pages (maximizes image vertically).
 - 📊 **Viewing Statistics**: Get basic statistics on your reading habits.
 - 🔄 **Server Switching**: Easily switch between different content servers.
-- 🧹 **Cache Management**: Clear cache easily (it grows fast!).
-- 🔍 **Upcoming Features**:
-  - Similar title suggestions for easier querying.
-  - Command line option to specify output directory.
-  - 🎨 **Customizable PDF Background**: Change the color of empty space in PDFs (default: black).
-- 💡 **More to Come**: Stay tuned for additional features as they develop!
+- 🧹 **Cache Management**: Clear cache easily (it can grow quickly!).
+- 🔧 **Error Handling**: Cull broken entries in the history JSON file caused by network drops or outages.
+- 🗂️ **Comprehensive History Tracking**: Reads stats from all history files (Backups are made when main history json file reaches 5mb).
 
+### 🔍 Upcoming Features:
+- 🎯 **Title-Based Recommendations**: Recommender based on title supplied.
+- 📂 **Custom Output Directory**: Specify an output directory using the `-o`, `--output-dir` option.
+- 🌐 **Proxy Support**: Use a SOCKS5 proxy with the `-ph`, `--proxy-host` option.
+- 🎨 **Customizable PDF Background**: Change the color of empty space in PDFs (default: black).
+- 🎲 **Randomization Options**: Randomizer or randomize based on genre.
+
+💡 **More to Come**: Stay tuned for additional features as they develop!
 
 ![image](https://github.com/user-attachments/assets/0e1792f4-dbc6-4bf0-8217-bb27a97c4cfc)
 
 
 ### Commands in program
-![image](https://github.com/user-attachments/assets/c03c3c5f-5fc0-4cbf-8250-b9416af07c18)
+![image](https://github.com/user-attachments/assets/1cb7862b-1800-4f92-8c0a-f74be3f9df11)
+
+
 
 
 
@@ -47,7 +54,8 @@ Find, read, maybe.
 | `Q` | Exit |
 
 ### Command Line Arguments
-![image](https://github.com/user-attachments/assets/3f9c5ca2-8cb1-4c7e-86e0-a8bce84df090)
+![image](https://github.com/user-attachments/assets/44bd9ada-c4a4-4eca-972f-5c141e5f2747)
+
 
 **Usage:**
 
@@ -68,8 +76,9 @@ Find, read, maybe.
 | `-st`, `--stats`             | Show history statistics                                    |
 | `-r`, `--resume`             | Continue from last session                                 |
 | `-od`, `--opendir`           | Open pdf directory                                        |
-| `-c`, `--cache-size`         | Print cache size (C:/Windows/Temp/.cache/goreadmanga)   |
-| `-C`, `--clear-cache`        | Purge cache directory (C:/Windows/Temp/.cache/goreadmanga) |
+| `-c`, `--cache-size`         | Print cache size (C:\Users\Administrator\AppData\Local\Temp\.cache\goreadmanga)   |
+| `-C`, `--clear-cache`        | Purge cache directory (C:\Users\Administrator\AppData\Local\Temp\.cache\goreadmanga) |
+| `-f`, `--fix`        | Remove json entries causing problems (empty chapter_page/chapter_title during network issues) |
 
 *Note: The cache directory path is an example; the application will use the OS's temporary directory by default.*
 
