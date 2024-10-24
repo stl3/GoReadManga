@@ -15,12 +15,12 @@ Find, read, maybe.
 - 🧹 **Cache Management**: Clear cache easily (it can grow quickly!).
 - 🔧 **Error Handling**: Cull broken entries in the history JSON file caused by network drops or outages.
 - 🗂️ **Comprehensive History Tracking**: Reads stats from all history files (Backups are made when main history json file reaches 5mb).
-
+- 🌐 **Proxy Support**: Use a SOCKS5 proxy with the `-ph`, `--proxy-host` option [`server:port`].
+  
 ### 🔍 Upcoming Features:
-- 🎯 **Title-Based Recommendations**: Recommender based on title supplied.
 - 📂 **Custom Output Directory**: Specify an output directory using the `-o`, `--output-dir` option.
-- 🌐 **Proxy Support**: Use a SOCKS5 proxy with the `-ph`, `--proxy-host` option.
 - 🎨 **Customizable PDF Background**: Change the color of empty space in PDFs (default: black).
+- 🎯 **Title-Based Recommendations**: Recommender based on title supplied.
 - 🎲 **Randomization Options**: Randomizer or randomize based on genre.
 
 💡 **More to Come**: Stay tuned for additional features as they develop!
@@ -54,7 +54,8 @@ Find, read, maybe.
 | `Q` | Exit |
 
 ### Command Line Arguments
-![image](https://github.com/user-attachments/assets/44bd9ada-c4a4-4eca-972f-5c141e5f2747)
+![image](https://github.com/user-attachments/assets/d6cf98b7-a4f9-4762-975f-b6a7054348d0)
+
 
 
 **Usage:**
@@ -71,6 +72,7 @@ Find, read, maybe.
 | `-jp`, `--jpegli`            | Use jpegli to re-encode jpegs                            |
 | `-q`, `--quality`            | Set quality to use with jpegli encoding (default: 85)    |
 | `-ws`, `--wide-split`        | Split images that are too wide and maximize vertically     |
+| `-ph`, `--proxy-host`        | Socks5 proxy support [server:port]     |
 | `-H`, `--history`            | Show last viewed manga entry in history                   |
 | `-bh`, `--browse-history`    | Browse history file, select and read                      |
 | `-st`, `--stats`             | Show history statistics                                    |
