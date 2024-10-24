@@ -34,18 +34,19 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/andybalholm/brotli"
-
 	"github.com/charmbracelet/lipgloss"
 	"github.com/gen2brain/jpegli"
-	"github.com/jung-kurt/gofpdf"
+	"github.com/go-pdf/fpdf"
+
 	fzf "github.com/koki-develop/go-fzf"
 	"github.com/schollz/progressbar/v3"
+	"golang.org/x/image/webp"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
 )
 
 const (
-	version     = "1.0.0"
+	version     = "0.1.46"
 	historyFile = "goreadmanga_history.json"
 )
 
@@ -67,6 +68,18 @@ type BrowseRecord struct {
 	Timestamp     time.Time `json:"timestamp"`
 }
 
+type MangaStatistics struct {
+	TotalChapters      int
+	ReadChapters       int
+	LastReadChapter    BrowseRecord
+	OldestTimestamp    time.Time
+	NewestTimestamp    time.Time
+	ReadingDates       []time.Time
+	ChaptersNotRead    int
+	UniqueChaptersRead map[int]bool // Track unique chapter numbers read
+	MostReadCount      int
+}
+
 type model struct {
 	records []BrowseRecord
 	cursor  int
@@ -78,6 +91,7 @@ var (
 	servers            = []string{"server2", "server1"} // Switch between content servers serving media
 	contentServer      string
 	isJPMode           bool        // check whether user wants jpegli enabled
+	isWideSplitMode    bool        // check whether user wants to split wide images or scale to A4
 	isCCacheMode       bool        // This check is done so we don't print storage size when inside program since it is called in inputControls()
 	useFancyDecoding        = true // Flag for toggling decoding method
 	jpegliQuality      int  = 85   // Default quality for jpegli encoding
@@ -98,6 +112,13 @@ var (
 	bracketStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF79C6"))
 	chapterStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("#95fb17"))
 	chapterStyleWithBG      = lipgloss.NewStyle().Foreground(lipgloss.Color("#95fb17")).Background(lipgloss.Color("#282A36"))
+	yellowFGbrownBG         = lipgloss.NewStyle().Foreground(lipgloss.Color("#95fb17")).Background(lipgloss.Color("#282A36"))
+	redFGblackBG            = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f56")).Background(lipgloss.Color("#1e1e1e"))
+	// blueFGpurpleBG          = lipgloss.NewStyle().Foreground(lipgloss.Color("#005f87")).Background(lipgloss.Color("#4B0082"))
+	blueFGpurpleBG   = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffff00")).Background(lipgloss.Color("#00194f"))
+	greenFGwhiteBG   = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00")).Background(lipgloss.Color("#ffffff"))
+	cyanFGdarkBlueBG = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ffff")).Background(lipgloss.Color("#000080"))
+	resetStyle       = lipgloss.NewStyle()
 )
 
 func init() {
@@ -105,6 +126,7 @@ func init() {
 	debug.SetMaxStack(1000000000)
 
 	checkJPFlag()
+	checkWideSplitFlag()
 	checkCCacheFlag()
 	checkCacheDir()
 }
@@ -142,6 +164,8 @@ func handleArguments(args []string) {
 		showHelp()
 	case "-v", "--version":
 		showVersion()
+	case "-ws", "--wide-split":
+		isWideSplitMode = true
 	case "-H", "--history":
 		showHistory()
 	case "-bh", "--browse-history":
@@ -154,13 +178,52 @@ func handleArguments(args []string) {
 		if err != nil {
 			fmt.Println("Error opening directory:", err)
 		}
+	case "-st", "--stats":
+		fetchStatistics()
 	case "-c", "--cache-size":
 		showCacheSize()
 	case "-C", "--clear-cache":
 		clearCache()
+	case "-f", "--fix":
+		removeEmptyEntries(historyFile)
 	default:
 		searchAndReadManga()
 	}
+}
+
+func fetchStatistics() {
+	var records []BrowseRecord
+	fileData, err := os.ReadFile(historyFile)
+	if err != nil {
+		return
+	}
+
+	if err := json.Unmarshal(fileData, &records); err != nil {
+		fmt.Printf("error unmarshaling data from historyFile: %v\n", err)
+	}
+
+	// Process records from additional JSON files
+	globPattern := "goreadmanga_history_*.json"
+	matches, err := filepath.Glob(globPattern)
+	if err != nil {
+		fmt.Printf("error finding additional history files: %v\n", err)
+	}
+
+	for _, filePath := range matches {
+		fileData, err := os.ReadFile(filePath)
+		if err != nil {
+			fmt.Printf("Error reading file %s: %v\n", filePath, err)
+			continue // skip to next file if reading fails
+		}
+		var additionalEntries []BrowseRecord
+		if err := json.Unmarshal(fileData, &additionalEntries); err != nil {
+			fmt.Printf("Error unmarshaling data from %s: %v\n", filePath, err)
+			continue // skip to next file if unmarshalling fails
+		}
+		records = append(records, additionalEntries...)
+	}
+
+	calculateStatistics(records)
 }
 
 func showHelp() {
@@ -173,12 +236,15 @@ func showHelp() {
   -v, --version          Print version number
   -jp, --jpegli          Use jpegli to re-encode jpegs
   -q, --quality		  Set quality to use with jpegli encoding (default: 85)
+  -ws, --wide-split      Split images that are too wide and maximize vertically
   -H, --history   	   Show last viewed manga entry in history
   -bh, --browse-history  Browse history file, select and read
+  -st, --stats           Show history statistics
   -r, --resume   	    Continue from last session
   -od, --opendir         Open pdf dir
   -c, --cache-size       Print cache size (` + cacheDir + `)
   -C, --clear-cache      Purge cache dir (` + cacheDir + `)
+  -f, --fix		      Remove json entries causing problems (empty chapter_page/chapter_title during network issues)
 `)
 
 	fmt.Printf(`
@@ -202,9 +268,7 @@ func showVersion() {
 func showCacheSize() {
 	size, err := getDirSize(cacheDir)
 	if err != nil {
-		////////// Debug Message //////////
-		// fmt.Printf("Error getting cache size or doesn't exist: %v\n", err)
-		///////////////////////////////////
+		fmt.Printf("Error or cache already empty: %v\n", err)
 		return
 	}
 	fmt.Printf("Cache size: %s (%s)\n", formatSize(size), cacheDir)
@@ -214,13 +278,10 @@ func clearCache() {
 	if !isCCacheMode { // Unlikely case, but if -C or --clear-cache ran with program we prevent it from showing duplicate cache size in menu
 		showCacheSize()
 	}
-
 	if promptYesNo("Proceed with clearing the cache?") {
 		err := os.RemoveAll(cacheDir)
 		if err != nil {
-			////////// Debug Message //////////
-			// fmt.Printf("Error clearing cache: %v\n", err)
-			///////////////////////////////////
+			fmt.Printf("Error or cache already empty: %v\n", err)
 		} else {
 			fmt.Println("💥💥 " + cyanColor.Render("Cache successfully cleared") + " 💥💥")
 		}
@@ -277,6 +338,7 @@ func scrapeMangaList(query string) []MangaResult {
 	})
 
 	// Limit to maximum 5 pages
+	// Not sure if what you're actually searching is beyond 1st 5 pages...
 	maxPages := 5
 	if lastPage < maxPages {
 		maxPages = lastPage
@@ -451,12 +513,14 @@ func scrapeChapterImages(chapterURL string) ([]string, string) {
 }
 
 func downloadAndConvertToPDF(manga MangaResult, chapter Chapter, imageURLs []string, chapterTitle string) string {
+	// totalChapters := len(chapters) // Add a record for total chapters so we can generate statistics
 	// Create a record for the current manga and chapter
 	record := BrowseRecord{
 		MangaTitle:    manga.Title,
 		ChapterNumber: chapter.Number,
 		ChapterTitle:  chapterTitle,
 		ChapterPage:   chapter.URL,
+		// TotalChapters: totalChapters,
 	}
 
 	// Record the browsing history
@@ -470,7 +534,7 @@ func downloadAndConvertToPDF(manga MangaResult, chapter Chapter, imageURLs []str
 	///////////////////////////////////
 
 	// Format the PDF filename with the chapter number and title
-	// pdfFilename := fmt.Sprintf("chapter_%d-%s.pdf", chapter.Number, chapterTitle)
+	// chapterTitle contains title/chapter number/chapter title
 	pdfFilename := fmt.Sprintf("%s.pdf", chapterTitle)
 	pdfPath := filepath.Join(mangaDir, pdfFilename)
 
@@ -592,37 +656,109 @@ func downloadAndConvertToPDF(manga MangaResult, chapter Chapter, imageURLs []str
 	os.RemoveAll(chapterDir)
 	runtime.GC()
 	return pdfPath
-
 }
 
 func createPDFFromImages(imagePaths []string, outputPath string) error {
-	pdf := gofpdf.New("P", "mm", "A4", "")
-	for _, imagePath := range imagePaths {
-		pdf.AddPage()
+	pdf := fpdf.New("P", "mm", "A4", "")
+	pageWidth, pageHeight := pdf.GetPageSize()
 
-		// Get image dimensions
-		file, _ := os.Open(imagePath)
-		image, _, err := image.DecodeConfig(file)
+	for _, imagePath := range imagePaths {
+		file, err := os.Open(imagePath)
+		if err != nil {
+			return fmt.Errorf("error opening image %s: %v", imagePath, err)
+		}
+		imgConfig, _, err := image.DecodeConfig(file)
 		file.Close()
 		if err != nil {
 			return fmt.Errorf("error decoding image %s: %v", imagePath, err)
 		}
 
-		// Calculate scaling factors
-		pageWidth, pageHeight := pdf.GetPageSize()
-		scaleX := pageWidth / float64(image.Width)
-		scaleY := pageHeight / float64(image.Height)
-		scale := math.Min(scaleX, scaleY)
+		// Calculate aspect ratios
+		imageRatio := float64(imgConfig.Height) / float64(imgConfig.Width)
+		pageRatio := pageHeight / pageWidth
 
-		width := float64(image.Width) * scale
-		height := float64(image.Height) * scale
+		// Check if image is very tall
+		if imageRatio > (2 * pageRatio) {
+			// Handle tall image (existing code)
+			scale := pageWidth / float64(imgConfig.Width)
+			scaledWidth := float64(imgConfig.Width) * scale
+			scaledHeight := float64(imgConfig.Height) * scale
+			numPages := int(math.Ceil(scaledHeight / pageHeight))
 
-		// Center the image on the page
-		x := (pageWidth - width) / 2
-		y := (pageHeight - height) / 2
+			for page := 0; page < numPages; page++ {
+				pdf.AddPage()
+				pdf.SetFillColor(0, 0, 0)
+				pdf.Rect(0, 0, pageWidth, pageHeight, "F")
+				yOffset := float64(page) * pageHeight
+				x := (pageWidth - scaledWidth) / 2
+				pdf.Image(imagePath, x, -yOffset, scaledWidth, scaledHeight, false, "", 0, "")
+			}
+		} else if isWideSplitMode { // Perform only if wide split mode specified
+			if float64(imgConfig.Width)/pageWidth > 1.5 {
+				// Handling horizontally wider image by splitting it horizontally
+				scale := pageHeight / float64(imgConfig.Height)
+				scaledWidth := float64(imgConfig.Width) * scale
+				scaledHeight := float64(imgConfig.Height) * scale
 
-		pdf.Image(imagePath, x, y, width, height, false, "", 0, "")
+				// Determine number of splits needed based on scaled width
+				numSplits := int(math.Ceil(scaledWidth / pageWidth))
+
+				// Calculate the exact width each slice should cover
+				sliceWidth := scaledWidth / float64(numSplits)
+
+				// Image options
+				var opt fpdf.ImageOptions
+				opt.AllowNegativePosition = true
+
+				// Calculate vertical centering once
+				yPosition := (pageHeight - scaledHeight) / 2
+
+				// Handle each split
+				for split := 0; split < numSplits; split++ {
+					pdf.AddPage()
+
+					// Set background [black]
+					pdf.SetFillColor(0, 0, 0)
+					pdf.Rect(0, 0, pageWidth, pageHeight, "F")
+
+					// Calculate horizontal position for current split
+					// Use sliceWidth instead of pageWidth for more precise splitting
+					xOffset := float64(split) * sliceWidth
+
+					// Add image with proper positioning
+					pdf.ImageOptions(
+						imagePath,
+						-xOffset,
+						yPosition,
+						scaledWidth,
+						scaledHeight,
+						false,
+						opt,
+						0,
+						"")
+				}
+
+			}
+		} else {
+			// Handle normal images
+			pdf.AddPage()
+			pdf.SetFillColor(0, 0, 0)
+			pdf.Rect(0, 0, pageWidth, pageHeight, "F")
+
+			scaleX := pageWidth / float64(imgConfig.Width)
+			scaleY := pageHeight / float64(imgConfig.Height)
+			scale := math.Min(scaleX, scaleY)
+
+			width := float64(imgConfig.Width) * scale
+			height := float64(imgConfig.Height) * scale
+
+			x := (pageWidth - width) / 2
+			y := (pageHeight - height) / 2
+
+			pdf.Image(imagePath, x, y, width, height, false, "", 0, "")
+		}
 	}
+
 	return pdf.OutputFileAndClose(outputPath)
 }
 
@@ -632,6 +768,7 @@ func openPDF(pdfPath string) {
 	switch runtime.GOOS {
 	case "android":
 		// Use an Intent to open the PDF file in Termux
+		// Needs fixing, doesn't open file browser
 		cmd = exec.Command("termux-open", pdfPath)
 
 	case "darwin": // macOS
@@ -681,8 +818,8 @@ func inputControls(manga MangaResult, chapters []Chapter, currentChapter Chapter
 	displayMenu := func(chapterTitle string, currentChapterNumber int, totalChapters int) {
 		fmt.Println(
 			bracketStyle.Render("[") +
-				chapterStyleWithBG.Render("Chapter") +
-				greenStyle.Render(fmt.Sprintf(" %d/%d", currentChapterNumber, totalChapters)) +
+				greenStyle.Render("Chapter") +
+				chapterStyleWithBG.Render(fmt.Sprintf(" %d/%d", currentChapterNumber, totalChapters)) +
 				bracketStyle.Render("] ") +
 				lightMagentaWithBg.Render("▄︻デ══━一 🌟💥 ", chapterTitle, " 💥🌟"),
 		)
@@ -692,13 +829,39 @@ func inputControls(manga MangaResult, chapters []Chapter, currentChapter Chapter
 		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("R") + bracketStyle.Render("]") + textStyle.Render(" Reopen current chapter"))
 		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("A") + bracketStyle.Render("]") + textStyle.Render(" Search another manga"))
 		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("BH") + bracketStyle.Render("]") + textStyle.Render(" Browse history, select to read"))
+		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("ST") + bracketStyle.Render("]") + textStyle.Render(" See stats"))
 		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("OD") + bracketStyle.Render("]") + textStyle.Render(" Open PDF dir"))
 		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("CS") + bracketStyle.Render("]") + textStyle.Render(" Toggle between content server1/2"))
 		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("D") + bracketStyle.Render("]") + textStyle.Render(" Toggle image decoding method [jpegli/normal]"))
 		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("M") + bracketStyle.Render("]") + textStyle.Render(" Toggle jpegli encoding mode [jpegli/normal]"))
+		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("WS") + bracketStyle.Render("]") + textStyle.Render(" Toggle splitting images wider than page"))
 		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("C") + bracketStyle.Render("]") + textStyle.Render(" Clear cache"))
 		fmt.Println(bracketStyle.Render("[") + greenStyle.Render("Q") + bracketStyle.Render("]") + textStyle.Render(" Exit"))
 		showCacheSize()
+		var jpConfig, decodeConfig, jpegliQualityConfig, widesplitConfig string
+		if isJPMode {
+			jpConfig = "Jpegli"
+		} else {
+			jpConfig = "Standard"
+		}
+		if useFancyDecoding {
+			decodeConfig = "Jpegli"
+		} else {
+			decodeConfig = "Standard"
+		}
+		if isWideSplitMode {
+			widesplitConfig = "ON"
+		} else {
+			widesplitConfig = "OFF"
+		}
+		serverConfig := servers[0]
+		jpegliQualityConfig = fmt.Sprintf("%d", jpegliQuality)
+		fmt.Println(cyanColor.Render("Current options: ") +
+			greenStyle.Render("Server") + bracketStyle.Render("[") + chapterStyleWithBG.Render(serverConfig) + bracketStyle.Render("] ") +
+			greenStyle.Render("Decoding") + bracketStyle.Render("[") + chapterStyleWithBG.Render(decodeConfig) + bracketStyle.Render("] ") +
+			greenStyle.Render("Encode") + bracketStyle.Render("[") + chapterStyleWithBG.Render(jpConfig) + bracketStyle.Render("] ") +
+			greenStyle.Render("Quality") + bracketStyle.Render("[") + chapterStyleWithBG.Render(jpegliQualityConfig) + bracketStyle.Render("] ") +
+			greenStyle.Render("Wide-split") + bracketStyle.Render("[") + chapterStyleWithBG.Render(widesplitConfig) + bracketStyle.Render("] "))
 	}
 
 	// Function to handle chapter navigation
@@ -727,6 +890,8 @@ func inputControls(manga MangaResult, chapters []Chapter, currentChapter Chapter
 			return
 		case "bh":
 			showHistoryWithFzf()
+		case "st":
+			fetchStatistics()
 		case "od":
 			checkCacheDir()
 			err := openDirectory(cacheDir)
@@ -740,6 +905,17 @@ func inputControls(manga MangaResult, chapters []Chapter, currentChapter Chapter
 		case "m":
 			isJPMode = !isJPMode
 			displayEncodingStatus()
+		case "ws":
+			isWideSplitMode = !isWideSplitMode
+			displayWideSplitStatus()
+			// Better to just clear cache manually from here
+			// rather than implementing bizarro code in clearCache()
+			err := os.RemoveAll(cacheDir)
+			if err != nil {
+				fmt.Printf("Error clearing cache: %v\n", err)
+			} else {
+				fmt.Println("💥💥 Cache cleared due to mode change 💥💥")
+			}
 		case "c":
 			clearCache()
 		case "q":
@@ -749,7 +925,6 @@ func inputControls(manga MangaResult, chapters []Chapter, currentChapter Chapter
 		}
 	}
 
-	// Main input loop
 	newURL, chapterTitle := updateChapterInfo(currentChapter)
 	currentChapter.URL = newURL
 
@@ -766,6 +941,15 @@ func displayEncodingStatus() {
 		fmt.Println("✔️✔️ ⚡⚡ " + indexStyle.Render("jpegli encoding active") + " ⚡⚡ ✔️✔️")
 	} else {
 		fmt.Println("❌❌ " + indexStyle.Render("jpegli encoding deactivated") + " ❌❌")
+	}
+}
+
+// Function to display wide-split mode
+func displayWideSplitStatus() {
+	if isWideSplitMode {
+		fmt.Println("✔️✔️ ⚡⚡ " + indexStyle.Render("Wide-split mode active") + " ⚡⚡ ✔️✔️")
+	} else {
+		fmt.Println("❌❌ " + indexStyle.Render("Wide-split mode deactivated") + " ❌❌")
 	}
 }
 
@@ -905,13 +1089,6 @@ func getImageServer(contentServer, chapterURL string) string {
 		contentServerPath = "server1"
 		// fmt.Printf("content server path is: %s\n", contentServerPath) // For debug
 	}
-
-	// fmt.Printf("content server is: %s\n", contentServer)
-	// contentServerPath := "server1"
-	// if contentServer == "server1" {
-	// 	contentServerPath = "server2"
-	// 	fmt.Printf("content server path is: %s\n", contentServerPath)
-	// }
 
 	// Set cookies
 	cookies := []*http.Cookie{
@@ -1097,7 +1274,7 @@ func downloadFile(urlStr, filepath string) error {
 	}
 
 	// Process the image if -jp is enabled
-	if err := processJPImage(filepath); err != nil {
+	if err := processImage(filepath); err != nil {
 		return err
 	}
 	return nil
@@ -1110,22 +1287,14 @@ func printJPUrl(urlStr string) {
 	}
 }
 
-// Helper function to process the image if -jp was passed
-func processJPImage(filepath string) error {
-	if isJPMode {
-		if err := processImage(filepath); err != nil {
-			return fmt.Errorf("image processing error: %v", err)
-		}
-	}
-	return nil
-}
-
 func processImage(filepath string) error {
-	format, err := identifyFormat(filepath)
+	format, err := IdentifyImageFormat(filepath)
 	if err != nil {
 		return fmt.Errorf("error identifying image format: %v", err)
 	}
-	fmt.Printf("Detected image format: %s\n", format)
+	if isJPMode {
+		fmt.Printf("Detected image format: %s\n", yellowStyle.Render(format))
+	}
 
 	origFile, err := openFile(filepath)
 	if err != nil {
@@ -1151,13 +1320,11 @@ func processImage(filepath string) error {
 	if err != nil {
 		return err
 	}
-
-	return encodeAndCompareSizes(filepath, origSize, img)
-
-}
-
-func identifyFormat(filepath string) (string, error) {
-	return IdentifyImageFormat(filepath)
+	if isJPMode {
+		return encodeAndCompareSizes(filepath, origSize, img)
+	} else {
+		return err
+	}
 }
 
 func openFile(filepath string) (*os.File, error) {
@@ -1169,13 +1336,21 @@ func handleOriginalFile(origFile *os.File, format string) (int64, image.Image, e
 	if err != nil {
 		return 0, nil, fmt.Errorf("error getting original file info: %v", err)
 	}
-	origSize := origInfo.Size()
 
+	origSize := origInfo.Size()
 	var img image.Image
-	if format == "png" {
+
+	switch format {
+	case "png":
 		img, err = png.Decode(origFile)
 		if err != nil {
 			return 0, nil, fmt.Errorf("error decoding PNG image: %v", err)
+		}
+	case "webp":
+		img, err = webp.Decode(origFile)
+		// img, err = webp.Decode(origFile, &decoder.Options{}) // for github.com/kolesa-team/go-webp
+		if err != nil {
+			return 0, nil, fmt.Errorf("error decoding WebP image: %v", err)
 		}
 	}
 
@@ -1183,7 +1358,7 @@ func handleOriginalFile(origFile *os.File, format string) (int64, image.Image, e
 }
 
 func convertImageIfNeeded(format, filepath string, img *image.Image) error {
-	if format == "png" {
+	if format == "png" || format == "webp" {
 		return convertToJpeg(*img, filepath)
 	}
 	return nil
@@ -1243,7 +1418,6 @@ func encodeAndCompareSizes(filepath string, origSize int64, img image.Image) err
 	return nil
 }
 
-// IdentifyImageFormat checks the magic numbers to determine the image format.
 func IdentifyImageFormat(filepath string) (string, error) {
 	file, err := os.Open(filepath)
 	if err != nil {
@@ -1252,7 +1426,7 @@ func IdentifyImageFormat(filepath string) (string, error) {
 	defer file.Close()
 
 	// Read the first few bytes of the file
-	header := make([]byte, 8)
+	header := make([]byte, 12) // Increase size to 12 bytes
 	_, err = file.Read(header)
 	if err != nil {
 		return "", fmt.Errorf("error reading file header: %v", err)
@@ -1263,10 +1437,12 @@ func IdentifyImageFormat(filepath string) (string, error) {
 		return "png", nil
 	} else if header[0] == 0xFF && header[1] == 0xD8 {
 		return "jpeg", nil
-	} else if header[0] == 0x49 && header[1] == 0x49 && header[2] == 0x2A && header[3] == 0x00 {
+	} else if header[0] == 0x49 && header[1] == 0x49 && header[2] == 0x2A {
 		return "tiff", nil
 	} else if header[0] == 0x4D && header[1] == 0x5A {
 		return "bmp", nil
+	} else if string(header[:4]) == "RIFF" && string(header[8:12]) == "WEBP" {
+		return "webp", nil
 	}
 
 	return "unknown", nil
@@ -1288,8 +1464,9 @@ func convertToJpeg(img image.Image, filepath string) error {
 	if err != nil {
 		return fmt.Errorf("error writing JPEG file: %v", err)
 	}
-
-	fmt.Printf("Converted image to JPEG and saved: %s\n", filepath)
+	if isJPMode {
+		fmt.Printf("Converted image to JPEG and saved: %s\n", filepath)
+	}
 	return nil
 }
 
@@ -1367,7 +1544,7 @@ func verifyImage(path string) bool {
 	}
 
 	// Check if the format is one of the allowed types
-	return format == "jpeg" || format == "png" || format == "gif"
+	return format == "jpeg" || format == "png" || format == "webp" || format == "gif"
 }
 
 func recordBrowseHistory(filename string, record BrowseRecord) error {
@@ -1636,7 +1813,6 @@ func selectHistoryWithGoFzf(records []BrowseRecord) ([]int, error) {
 			}),
 		),
 	)
-
 	if err != nil {
 		return nil, err
 	}
@@ -1671,6 +1847,16 @@ func checkJPFlag() {
 	}
 }
 
+// Checks if "-jp" was passed in the command-line arguments
+func checkWideSplitFlag() {
+	for _, arg := range os.Args[1:] {
+		if arg == "-ws" || arg == "--wide-split" {
+			isWideSplitMode = true
+			break
+		}
+	}
+}
+
 // Checks if "-C" "--clear-cache" was passed in the command-line arguments
 func checkCCacheFlag() {
 	// Check if there are any flags related to cache mode
@@ -1691,10 +1877,22 @@ func checkCacheDir() {
 
 	tempDir := os.TempDir()
 	cacheDir = filepath.Join(tempDir, ".cache", "goreadmanga")
-
 }
 
 func openDirectory(cacheDir string) error {
+	// Just for future reference
+	// OS PATHS
+	// Config Paths
+	// Linux
+	// ${XDG_CONFIG_HOME:-${HOME}/.config}/example/config
+	// MacOS
+	// ${HOME}/Library/Application Support/example/config
+	// Termux
+	// $HOME/.config/example/config
+	// Windows
+	// %APPDATA%\example\config
+	// %APPDATA%\.config\example\config
+
 	// Get the operating system type
 	absPath, _ := filepath.Abs(cacheDir) // Convert to absolute path
 	switch runtime.GOOS {
@@ -1713,4 +1911,159 @@ func openDirectory(cacheDir string) error {
 	default:
 		return fmt.Errorf("unsupported platform")
 	}
+}
+
+func calculateStatistics(entries []BrowseRecord) {
+	mangaStats := make(map[string]*MangaStatistics)
+	for _, entry := range entries {
+		baseURL := trimChapterFromURL(entry.ChapterPage)
+		// Initialize statistics if it doesn't exist for this manga
+		if _, exists := mangaStats[entry.MangaTitle]; !exists {
+			chapters := scrapeChapterList(baseURL)
+			mangaStats[entry.MangaTitle] = &MangaStatistics{
+				TotalChapters:      len(chapters),
+				ChaptersNotRead:    len(chapters), // Assume all chapters are initially unread
+				UniqueChaptersRead: make(map[int]bool),
+			}
+		}
+
+		stats := mangaStats[entry.MangaTitle]
+
+		// Only count the chapter if it hasn't been read before
+		if !stats.UniqueChaptersRead[entry.ChapterNumber] {
+			stats.UniqueChaptersRead[entry.ChapterNumber] = true
+			stats.ReadChapters++
+			stats.ChaptersNotRead--
+		}
+
+		// Update the last read chapter
+		stats.LastReadChapter = entry
+
+		// Update timestamps
+		timestamp := entry.Timestamp
+		if stats.OldestTimestamp.IsZero() || timestamp.Before(stats.OldestTimestamp) {
+			stats.OldestTimestamp = timestamp
+		}
+		if timestamp.After(stats.NewestTimestamp) {
+			stats.NewestTimestamp = timestamp
+		}
+
+		stats.ReadingDates = append(stats.ReadingDates, timestamp)
+	}
+
+	// Aggregate statistics across all manga
+	var totalChaptersRead, totalManga int
+	var mostReadManga string
+	mostReadCount := 0
+
+	for title, stats := range mangaStats {
+		percentage := (float64(stats.ReadChapters) / float64(stats.TotalChapters)) * 100
+
+		// Print statistics with styles
+		fmt.Println(blueFGpurpleBG.Render(fmt.Sprintf("Manga: %s | Read: %d/%d (%.2f%%)", title, stats.ReadChapters, stats.TotalChapters, percentage)))
+		fmt.Println(yellowFGbrownBG.Render(fmt.Sprintf("  Last Read Chapter: %s", stats.LastReadChapter.ChapterTitle)))
+
+		// Format timestamps
+		oldestFormatted := stats.OldestTimestamp.Format("2 Jan 2006 [3:04 PM] GMT-07")
+		newestFormatted := stats.NewestTimestamp.Format("2 Jan 2006 [3:04 PM] GMT-07")
+		fmt.Println(redFGblackBG.Render(fmt.Sprintf("  Oldest Read Chapter: %s", oldestFormatted)))
+		fmt.Println(redFGblackBG.Render(fmt.Sprintf("  Newest Read Chapter: %s", newestFormatted)))
+		fmt.Println(redFGblackBG.Render(fmt.Sprintf("  Chapters Not Read: %d", stats.ChaptersNotRead)))
+
+		// Update overall statistics
+		totalChaptersRead += stats.ReadChapters
+		totalManga++
+
+		if stats.ReadChapters > mostReadCount {
+			mostReadCount = stats.ReadChapters
+			mostReadManga = title
+		}
+	}
+
+	// Print overall statistics
+	if totalManga > 0 {
+		averageChapters := float64(totalChaptersRead) / float64(totalManga)
+		fmt.Println(yellowFGbrownBG.Render(fmt.Sprintf("Average Chapters Read per Manga: %.2f", averageChapters)) + resetStyle.Render(""))
+		fmt.Println(yellowFGbrownBG.Render(fmt.Sprintf("Most Read Manga: %s with %d chapters read.", mostReadManga, mostReadCount)) + resetStyle.Render(""))
+	}
+
+	// Calculate Reading Frequency and Streaks
+	for title, stats := range mangaStats {
+		if len(stats.ReadingDates) > 1 {
+			uniqueDays := make(map[string]bool)
+			streak := 0
+
+			for _, date := range stats.ReadingDates {
+				// Format the date to a string (YYYY-MM-DD) for uniqueness
+				formattedDate := date.Format("2006-01-02")
+				uniqueDays[formattedDate] = true
+			}
+
+			// Count unique days to determine the streak
+			for i := range stats.ReadingDates {
+				if uniqueDays[stats.ReadingDates[i].Format("2006-01-02")] {
+					streak++
+					delete(uniqueDays, stats.ReadingDates[i].Format("2006-01-02")) // Remove to ensure counting unique days only
+				}
+			}
+			fmt.Println(fmt.Sprintf("Reading Streak for %s: %s days"+resetStyle.Render(""), blueFGpurpleBG.Render(title), lightMagentaWithBg.Render(fmt.Sprintf("%d", streak))))
+
+		}
+	}
+}
+
+// Function to remove the chapter part of the URL
+func trimChapterFromURL(url string) string {
+	// Find the index of the last '/'
+	lastSlashIndex := strings.LastIndex(url, "/")
+	if lastSlashIndex != -1 {
+		// Return the URL up to and including the last '/'
+		return url[:lastSlashIndex+1]
+	}
+	// Return the original URL if no '/' is found
+	return url
+}
+
+func removeEmptyEntries(filePath string) error {
+	// Read the existing data from the file
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("error reading file %s: %v", filePath, err)
+	}
+
+	// Unmarshal the data into a slice of BrowseRecord
+	var entries []BrowseRecord
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return fmt.Errorf("error unmarshaling data from %s: %v", filePath, err)
+	}
+
+	// Filter entries to keep only those with non-empty chapter_page and chapter_title
+	filteredEntries := make([]BrowseRecord, 0, len(entries))
+
+	for _, entry := range entries {
+		if entry.ChapterPage != "" || entry.ChapterTitle != "" {
+			filteredEntries = append(filteredEntries, entry)
+		}
+	}
+
+	// Check if any entries were removed
+	if len(filteredEntries) != len(entries) {
+		fmt.Printf("Removed %d entries with empty chapter_page or chapter_title from %s\n", len(entries)-len(filteredEntries), filePath)
+	} else {
+		fmt.Println("No entries removed from", filePath)
+	}
+
+	// Marshal the filtered entries back to JSON
+	filteredData, err := json.MarshalIndent(filteredEntries, "", "  ")
+	if err != nil {
+		return fmt.Errorf("error marshaling filtered data: %v", err)
+	}
+
+	// Write the updated data back to the file
+	err = os.WriteFile(filePath, filteredData, 0644) // Adjust permissions as needed
+	if err != nil {
+		return fmt.Errorf("error writing updated data to %s: %v", filePath, err)
+	}
+
+	return nil
 }
