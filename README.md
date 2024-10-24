@@ -3,6 +3,7 @@
 # GoReadManga
 Find, read, maybe.
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/stl3/GoReadManga)](https://goreportcard.com/report/github.com/stl3/GoReadManga)
 ### Features ✨
 
 - 🚀 **Convenient & Fast**: Quickly fetch and search for manga with ease.
