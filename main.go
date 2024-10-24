@@ -818,8 +818,8 @@ func inputControls(manga MangaResult, chapters []Chapter, currentChapter Chapter
 	displayMenu := func(chapterTitle string, currentChapterNumber int, totalChapters int) {
 		fmt.Println(
 			bracketStyle.Render("[") +
-				greenStyle.Render("Chapter") +
-				chapterStyleWithBG.Render(fmt.Sprintf(" %d/%d", currentChapterNumber, totalChapters)) +
+				greenStyle.Render("Chapter ") +
+				chapterStyleWithBG.Render(fmt.Sprintf("%d/%d", currentChapterNumber, totalChapters)) +
 				bracketStyle.Render("] ") +
 				lightMagentaWithBg.Render("▄︻デ══━一 🌟💥 ", chapterTitle, " 💥🌟"),
 		)
@@ -1874,7 +1874,6 @@ func checkCCacheFlag() {
 }
 
 func checkCacheDir() {
-
 	tempDir := os.TempDir()
 	cacheDir = filepath.Join(tempDir, ".cache", "goreadmanga")
 }
