@@ -28,6 +28,16 @@ Find, read, maybe.
 
 💡 **More to Come**: Stay tuned for additional features as they develop!
 
+### Installing
+###### Windows: 
+Download from [releases page](https://github.com/stl3/GoReadManga/releases), and move executable into its own directory. If you move and run it in another directory, a new json will be created unless you move the old one to the new location. It is better to have a dedicated directory for it.
+
+### Building
+###### Windows: 
+`go build -o GoReadManga.exe main.go`
+###### Others: 
+`go build -o GoReadManga main.go`
+
 ![image](https://github.com/user-attachments/assets/0e1792f4-dbc6-4bf0-8217-bb27a97c4cfc)
 
 
